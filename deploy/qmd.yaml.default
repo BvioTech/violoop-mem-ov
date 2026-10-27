@@ -1,0 +1,11 @@
+# Existing /etc/qmd/qmd.yaml is never overwritten. The path is retained for
+# Device compatibility; old zone options are ignored by the OpenViking backend.
+backend: openviking
+socket: /run/violoop-mem/violoop-mem.sock
+socket_mode: "0660"
+socket_group: violoop
+embedding:
+  enabled: true
+openviking:
+  mode: managed
+  url: http://127.0.0.1:1933

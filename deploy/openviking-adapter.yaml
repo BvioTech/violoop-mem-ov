@@ -1,0 +1,16 @@
+# node service/server.js --config deploy/openviking-adapter.yaml
+backend: openviking
+socket: /run/violoop-mem/violoop-mem.sock
+socket_mode: "0660"
+socket_group: violoop
+data_dir: /var/lib/violoop-mem-openviking-pilot
+
+openviking:
+  mode: managed
+  url: http://127.0.0.1:1933
+  account: default
+  user: default
+  actor_peer: violoop
+  timeout_ms: 15000
+  recall_max_chars: 600
+  search_max_chars: 6000

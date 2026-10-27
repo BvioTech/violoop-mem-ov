@@ -1,0 +1,12 @@
+.git
+.venv
+.build-tools
+node_modules
+build
+dist
+.local
+**/__pycache__
+**/target
+*.db
+*.key
+.env*

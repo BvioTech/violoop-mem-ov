@@ -1,0 +1,27 @@
+# Local dependencies, toolchains and build products
+node_modules/
+.venv/
+.build-tools/
+build/
+dist/
+.local/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+# Runtime state and credentials
+.env
+.env.*
+!.env.example
+ov.conf
+*.key
+*.db
+*.db-wal
+*.db-shm
+*.gguf
+*.safetensors
+data/
+logs/

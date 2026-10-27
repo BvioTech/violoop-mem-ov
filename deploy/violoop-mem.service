@@ -1,0 +1,110 @@
+# violoop-mem systemd unit.
+#
+# 0.9.0 起与 qmd.service **共存**(不 Conflicts、不碰它的 socket/数据):
+#   - user/group: violoop-mem(+ violoop 附加组 = 跨服务共享通道,edge 备份
+#     暂存目录、兄弟服务访问 socket 都走它)
+#   - socket: /run/violoop-mem/violoop-mem.sock;qmd 的 /run/qmd/qmd.sock
+#     完全归 qmd 自己,本服务不建兼容 symlink(那会劫持 qmd 的路径)。
+#     edge ≥0.8-era 按候选动态解析并优先本服务;更老的 edge 继续与 qmd
+#     对话,行为不变
+#   - config 仍读 /etc/qmd/qmd.yaml(操作员既有配置不迁;unit 的 --socket
+#     显式旗标优先于配置文件里的 socket 字段,老配置钉旧路径也不影响)
+#   - 嵌入模型:violoop-mem-model deb(/usr/local/share/violoop/mem/models),
+#     遗留 violoop-qmd-model 自动兜底;缺模型退词法检索,服务照常健康
+#   - state 在 /var/lib/violoop-mem(qmd 的 markdown 存量只读导入一次,
+#     /var/lib/qmd 不删不改)
+#
+# Install: `apt-get install violoop-mem`(用户/组/数据目录由 preinst/postinst
+# 处理,首启空库自动导入旧 qmd markdown 存量)。
+
+[Unit]
+Description=violoop-mem managed OpenViking memory service
+Documentation=https://github.com/BvioTech/violoop-mem-ov
+After=network.target
+# 资源上限见 [Service] 段;这里只管"别无限重启"。
+#
+# ⚠ 窗口放大**会让触发变容易**,不是变宽松 —— 算一遍就知道:
+#   起来就崩(启动间隔≈RestartSec):任何窗口都在几十秒内用完配额 → 都会停手。
+#   跑一阵被 OOM 杀(启动间隔≈存活时长):窗口 10s(systemd 默认)时窗口内永远
+#   只有 1 次,**永远不触发、一直自愈**;窗口 300s 时 5 分钟内攒够 5 次,**必触发**。
+# 后一种正是本段要防的 OOM 场景,拿 300s/5 反而把"整机内存紧张十分钟"这种
+# 会自己过去的事变成永久停手 —— socket 从此不出现,edge 侧静默降级到 qmd,
+# 图谱死掉而树记忆还在,没人看得出来。
+#
+# 所以按"最长能扛多久的内存紧张"来定,而不是按次数拍脑袋:
+# RestartSec=10 × 60 次 = 持续失败 10 分钟才停手;窗口取 1 小时,零星崩几次
+# (一小时内 <60 次)不算数。真到 60 次是硬故障,停手等人看是对的。
+# 触发后恢复:systemctl reset-failed violoop-mem && systemctl start violoop-mem
+StartLimitIntervalSec=3600
+StartLimitBurst=60
+
+[Service]
+Type=simple
+User=violoop-mem
+Group=violoop-mem
+SupplementaryGroups=violoop
+# Optional pilot settings: OPENVIKING_URL/API_KEY/ACCOUNT/USER and backend.
+# OpenViking runs as this service's child; /readyz reports native readiness.
+EnvironmentFile=-/etc/violoop-mem/openviking.env
+# --http-port is loopback-only (debug / graphify over an ssh tunnel); the
+# socket is the product surface.
+ExecStart=/usr/bin/node --max-old-space-size=512 /opt/violoop-mem/server.js --socket /run/violoop-mem/violoop-mem.sock --socket-mode 0660 --socket-group violoop --data-dir /var/lib/violoop-mem --http-port 7700 --http-host 127.0.0.1
+RuntimeDirectory=violoop-mem
+RuntimeDirectoryMode=0755
+StateDirectory=violoop-mem
+StateDirectoryMode=0755
+Restart=on-failure
+KillMode=control-group
+TimeoutStopSec=30
+# 2s 太短:被 OOM 杀之后立刻起来,内存还没回收完,只会再被杀一次,几十秒就把
+# 上面的重启配额烧光。10s 给内核一点回收时间;记忆服务不在实时路径上(edge
+# 侧调用本就带重试),多等 8 秒换"内存紧张过去后能自己活过来"是划算的。
+RestartSec=10
+# 78 = EX_CONFIG,服务用它表示"环境错配,重启多少次都一样"(例如:
+# 原生模块的 Node ABI 跟本机 node 对不上,见原生模块加载检查)。不拦的话
+# 会一路重启到 systemd 的 start-limit,日志被同一段堆栈刷满,真正那句原因反而
+# 埋在最上面看不见。
+RestartPreventExitStatus=78
+
+# ---- 资源上限(EN 18031 韧性要求:单个服务的资源消耗必须有界,失控时
+# 被隔离而不是拖垮整机)-------------------------------------------------
+# 数字来自 dev16(8 核 arm64 / 7.7G 内存)0.11.3 实测:cgroup 内存峰值 1.37G,
+# 其中 bge-m3 Q8 模型 mmap 常驻约 340M(文件全长 640M,可回收)、llama 计算
+# 缓冲约 250M、Node 堆 23M;线程 11、fd 26。
+#
+# MemoryHigh 是软限:超过先回收页缓存(模型 mmap 部分)并节流,不杀;
+# MemoryMax 是硬限:到顶 OOM-kill 本 cgroup,由 Restart=on-failure 拉起。
+# 两档之间留 ~250M,让节流有机会先于击杀发生。swap 单独封顶,防止像 23:29
+# 那种整机 swap 被别人吃光时本服务反过来成为换出大户。
+#
+# ⚠ 这两个数按 7.7G 的板子定。内存更小的机型由 postinst 写 drop-in 覆盖
+# (/etc/systemd/system/violoop-mem.service.d/10-memory.conf,见 scripts/deb/postinst.sh):
+# 峰值 1.37G 的大头是模型 mmap + llama 计算缓冲,在 4G 机器上占比太高,硬限
+# 只会变成"定时被杀",所以小内存机型只留软限节流、把硬限交回整机 OOM killer
+# (配合下面的 OOMScoreAdjust,本服务排在多数进程之后)。
+MemoryHigh=1792M
+MemoryMax=2G
+MemorySwapMax=512M
+# 内存紧张时内核按 oom_score 挑人杀。本服务是 edge 的记忆后端,不该替前端
+# 的泄漏陪葬;-500 让它排到大多数用户态进程之后,但不到 -1000 的免死。
+OOMScoreAdjust=-500
+# ExecStart 里的 --max-old-space-size=512:给 **JS 侧**的泄漏一个更早、可诊断的
+# 触发点(堆溢出留下 JS 栈,cgroup 击杀只有一行 SIGKILL)。
+# ⚠ 它拦不住撞上 MemoryMax 的那条路 —— 按上面实测的构成,1.37G 里模型 mmap
+# 340M + 计算缓冲 250M 都不走 V8 堆,Node 堆才 23M。堆涨到 512M 时 cgroup 总量
+# 可能才 1G 出头,离 2G 还远;反过来 mmap+缓冲把 cgroup 顶到 2G 时,堆可能还在
+# 30M。两条路互相独立,别指望它当硬限的前置闸。
+#
+# CPU:嵌入是纯 CPU 推理,node-llama-cpp 默认开满核。封到 4 核,保证
+# kiosk / screen-analyze 在批量 embed 时仍有核可用;4 核以下的板子等于不限。
+CPUQuota=400%
+# 线程:Node 主线程 + libuv 池 + V8 worker + llama 推理线程(≤核数)。实测 11,
+# 64 够 16 核机器跑满还剩余量;真到顶说明线程泄漏,该被拦。
+TasksMax=256
+# fd:unix socket + 回环 http + sqlite(db/wal/shm)+ 模型文件。实测 26。
+LimitNOFILE=4096
+# 禁 core dump:模型缓冲 + 图数据落盘一次就是 GB 级,State 分区扛不住。
+LimitCORE=0
+
+[Install]
+WantedBy=multi-user.target

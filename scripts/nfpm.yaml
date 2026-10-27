@@ -1,0 +1,138 @@
+# nfpm config — produces violoop-mem_<version>_arm64.deb.
+#
+# Invoked by scripts/build-deb.sh after `npm ci --omit=dev --include=optional`.
+# VERSION is injected from package.json via the env var.
+#
+# 部署形态承袭 violoop-qmd(nfpm deb + systemd)并整包接管它;0.8.0 起
+# 使用自有身份:violoop-mem 用户/组 + /run/violoop-mem/violoop-mem.sock
+# (旧 socket 路径留兼容 symlink 供在途 edge 过渡);配置仍读
+# /etc/qmd/qmd.yaml(操作员既有配置不迁)。
+
+name: violoop-mem
+arch: arm64
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: utils
+priority: optional
+maintainer: josley <josley@bvio.ai>
+description: |
+  Violoop memory service with an OpenViking backend and device-compatible
+  recall/search/ingest APIs over Unix socket. Bundles and supervises the native
+  OpenViking engine, reusing the device LLM router and local BGE embedding.
+
+depends:
+  # 由 build-deb.sh 按构建机的 Node 大版本注入(nodejs (>= 24) / (<< 25))。
+  # 不能写成开区间的 `nodejs (>= 18)`:包里的 better-sqlite3 是**预编译**原生
+  # 模块,绑死打包那台机器的 Node ABI,跨大版本必然 ERR_DLOPEN_FAILED。写成
+  # >= 18 的后果是 apt 一声不吭装上去、服务起不来(0.11.1 在 Node 24 的盒子上
+  # 就这样,重启 59 次后被 systemd 放弃)。收成一个大版本,错配在装的时候就报。
+  - ${NODE_DEP_MIN}
+  - ${NODE_DEP_MAX}
+  # deb-systemd-helper 的来源。maintainer script 用它建/删 wants symlink ——
+  # 那条路必须在没有运行中 systemd 的镜像构建 chroot 里也能走通(见
+  # scripts/deb/postinst.sh)。systemd 机器上它本来就是必备包,写出来只是把
+  # 隐含依赖说明白(debhelper 打包时这条由 ${misc:Depends} 自动带上)。
+  - init-system-helpers
+  - python3 (>= 3.11)
+  - python3 (<< 3.12)
+  - libstdc++6
+  - violoop-mem-model (>= 1.0.0)
+
+# 0.9.0 起与 violoop-qmd **并装共存**(不 conflicts、不 replaces):
+# 两服务各有用户与 socket(0.8.0 身份分离),qmd 原封不动,edge 侧
+# 解析优先 violoop-mem。装本包从此不触发任何移除——0.5.0 时代
+# conflicts+连坐卸 edge 的事故类别从结构上消灭。
+#
+# provides 保留:qmd 未安装的盒子(全新机)上,老 edge deb 的
+# Depends: violoop-qmd (>= 2.0.11) 由本包满足;必须带版本(Debian
+# 语义下无版本 Provides 满足不了带版本依赖,0.5.0 栽过)。
+provides:
+  - violoop-qmd (= 2.0.12)
+
+contents:
+  - src: ./service/server.js
+    dst: /opt/violoop-mem/server.js
+  - src: ./service/openviking_adapter.js
+    dst: /opt/violoop-mem/openviking_adapter.js
+  - src: ./service/openviking_client.js
+    dst: /opt/violoop-mem/openviking_client.js
+  - src: ./service/openviking_entries.js
+    dst: /opt/violoop-mem/openviking_entries.js
+  - src: ./service/openviking_manual.js
+    dst: /opt/violoop-mem/openviking_manual.js
+  - src: ./service/openviking_consolidation.js
+    dst: /opt/violoop-mem/openviking_consolidation.js
+  - src: ./service/openviking_graph.js
+    dst: /opt/violoop-mem/openviking_graph.js
+  - src: ./service/openviking_uri.js
+    dst: /opt/violoop-mem/openviking_uri.js
+  - src: ./service/openviking_agent.js
+    dst: /opt/violoop-mem/openviking_agent.js
+  - src: ./service/event_time_decay.js
+    dst: /opt/violoop-mem/event_time_decay.js
+  - src: ./service/hybrid_search.js
+    dst: /opt/violoop-mem/hybrid_search.js
+  - src: ./service/retrieval_budget.js
+    dst: /opt/violoop-mem/retrieval_budget.js
+  - src: ./service/openviking_runtime.js
+    dst: /opt/violoop-mem/openviking_runtime.js
+  - src: ./service/model_gateway.js
+    dst: /opt/violoop-mem/model_gateway.js
+  - src: ./service/migration_timing.js
+    dst: /opt/violoop-mem/migration_timing.js
+  - src: ./service/migration_embedding.js
+    dst: /opt/violoop-mem/migration_embedding.js
+  - src: ./scripts/migration-timing-report.py
+    dst: /opt/violoop-mem/scripts/migration-timing-report.py
+  - src: ./service/legacy_source.js
+    dst: /opt/violoop-mem/legacy_source.js
+  - src: ./service/legacy_migration_plan.js
+    dst: /opt/violoop-mem/legacy_migration_plan.js
+  - src: ./service/legacy_migration.js
+    dst: /opt/violoop-mem/legacy_migration.js
+  - src: ./service/durable_json.js
+    dst: /opt/violoop-mem/durable_json.js
+  - src: ./build/openviking-python
+    dst: /opt/violoop-mem/openviking-python
+    type: tree
+  - src: ./service/embedder.js
+    dst: /opt/violoop-mem/embedder.js
+  - src: ./service/config.js
+    dst: /opt/violoop-mem/config.js
+  - src: ./service/frontmatter.js
+    dst: /opt/violoop-mem/frontmatter.js
+  - src: ./build/package.json
+    dst: /opt/violoop-mem/package.json
+  - src: ./build/package-lock.json
+    dst: /opt/violoop-mem/package-lock.json
+  - src: ./README.md
+    dst: /opt/violoop-mem/README.md
+  - src: ./deploy/openviking-adapter.yaml
+    dst: /opt/violoop-mem/openviking-adapter.yaml
+  - src: ./deploy/ov.conf.example
+    dst: /opt/violoop-mem/ov.conf.example
+  - src: ./scripts/openviking-live-smoke.js
+    dst: /opt/violoop-mem/scripts/openviking-live-smoke.js
+  - src: ./node_modules
+    dst: /opt/violoop-mem/node_modules
+    type: tree
+
+  # systemd unit + default config template. The default ships to /opt (NOT a
+  # dpkg conffile); postinst seeds /etc/qmd/qmd.yaml from it only when the
+  # file does not exist (fresh boxes without the old violoop-qmd deb), so
+  # upgrades and takeovers never touch operator-edited config.
+  - src: ./deploy/violoop-mem.service
+    dst: /lib/systemd/system/violoop-mem.service
+    file_info:
+      mode: 0644
+  - src: ./deploy/qmd.yaml.default
+    dst: /opt/violoop-mem/qmd.yaml.default
+    file_info:
+      mode: 0644
+
+scripts:
+  preinstall: ./scripts/deb/preinst.sh
+  postinstall: ./scripts/deb/postinst.sh
+  preremove: ./scripts/deb/prerm.sh
+  postremove: ./scripts/deb/postrm.sh

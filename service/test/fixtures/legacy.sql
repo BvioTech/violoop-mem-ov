@@ -1,0 +1,9 @@
+-- Legacy on-disk schema used by migration. No old engine code is required.
+CREATE TABLE memories (id TEXT PRIMARY KEY, key TEXT UNIQUE NOT NULL, content TEXT DEFAULT '', type TEXT DEFAULT 'archival', title TEXT DEFAULT '', tags TEXT DEFAULT '[]', half_life_days REAL DEFAULT 0, meta TEXT DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE entities (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT DEFAULT 'concept', aliases TEXT DEFAULT '[]', properties TEXT DEFAULT '{}', observations TEXT DEFAULT '[]', domains TEXT DEFAULT '[]', dirty INTEGER DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_accessed_at TEXT);
+CREATE TABLE relations (id TEXT PRIMARY KEY, source TEXT NOT NULL REFERENCES entities(id), target TEXT NOT NULL REFERENCES entities(id), relation_type TEXT NOT NULL, properties TEXT DEFAULT '{}', confidence REAL DEFAULT 1.0, decay TEXT DEFAULT 'permanent', valid_until TEXT, half_life REAL DEFAULT 30, created_at TEXT NOT NULL, last_accessed_at TEXT);
+CREATE TABLE episodes (id TEXT PRIMARY KEY, session_id TEXT, title TEXT NOT NULL DEFAULT 'Untitled', summary TEXT DEFAULT '', messages TEXT DEFAULT '[]', status TEXT DEFAULT 'extracted', created_at TEXT NOT NULL);
+CREATE TABLE entity_sources (entity_id TEXT NOT NULL, episode_id TEXT, excerpt TEXT DEFAULT '', created_at TEXT NOT NULL);
+CREATE TABLE entity_obs_sources (entity_id TEXT NOT NULL, obs_hash TEXT NOT NULL, episode_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(entity_id, obs_hash, episode_id));
+CREATE TABLE relation_sources (relation_id TEXT NOT NULL, episode_id TEXT, excerpt TEXT DEFAULT '', created_at TEXT NOT NULL);
+CREATE TABLE mem_vectors (key TEXT NOT NULL, seq INTEGER NOT NULL, content_hash TEXT NOT NULL, embedding BLOB NOT NULL, PRIMARY KEY(key,seq));

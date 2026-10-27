@@ -1,0 +1,29 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 1933,
+    "auth_mode": "dev"
+  },
+  "storage": {
+    "workspace": "/app/.openviking/workspace",
+    "vectordb": { "backend": "local" },
+    "agfs": { "backend": "local" }
+  },
+  "embedding": {
+    "dense": {
+      "provider": "openai",
+      "api_base": "${OV_EMBEDDING_BASE_URL}",
+      "api_key": "${OV_EMBEDDING_API_KEY}",
+      "model": "${OV_EMBEDDING_MODEL}",
+      "dimension": 1024,
+      "input": "text"
+    }
+  },
+  "vlm": {
+    "provider": "openai",
+    "api_base": "${OV_LLM_BASE_URL}",
+    "api_key": "${OV_LLM_API_KEY}",
+    "model": "${OV_LLM_MODEL}",
+    "temperature": 0.0
+  }
+}
