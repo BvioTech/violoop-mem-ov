@@ -43,7 +43,7 @@
           "path": "docs/legacy-memory-migration.md",
           "sha256": "7079fdf9f11994fc63acbc1063223970e0e32194ca454ef813a5bed7b40323da",
           "destination": "docs/legacy-memory-migration.md",
-          "integration_sha256": "1b7142b174df1cc248919f600dd97cbf5ebab1bcb2e79afe2d93334143977191"
+          "integration_sha256": "afa7c4b9bc6bc773b2cf9d2f5bb7c41a887d849e96413908bd822c27cb97fc25"
         },
         {
           "path": "docs/managed-deployment.md",
@@ -59,7 +59,8 @@
         {
           "path": "embedder.js",
           "sha256": "eccfd770d1f88ac7076045fe0fb9d8473d6c087f29d3a970932848979846313f",
-          "destination": "service/embedder.js"
+          "destination": "service/embedder.js",
+          "integration_sha256": "97b006f4a61b390a0f1672e477044e7ae5b9c0e0280bf18a38fa90449b7e2848"
         },
         {
           "path": "event_time_decay.js",
@@ -79,7 +80,8 @@
         {
           "path": "legacy_migration.js",
           "sha256": "5a94408fb10579c9793bbbc79cecc52041036d0e4cdacbe3970fe1539d0e5ec1",
-          "destination": "service/legacy_migration.js"
+          "destination": "service/legacy_migration.js",
+          "integration_sha256": "d9dfafceea26b2d371d31d3a48c988fcbc27c60139d1ac5bc7ac17413d585ada"
         },
         {
           "path": "legacy_migration_plan.js",
@@ -106,13 +108,13 @@
           "path": "model_gateway.js",
           "sha256": "a2dac026280376e24c4df78f211c04554ed87f6e8fd3747f33d7a6007cb5f1a0",
           "destination": "service/model_gateway.js",
-          "integration_sha256": "64e90589e21c0e71a4f8c518de65fef6b2b91bf57b18ce5ac285b09fa2c08c30"
+          "integration_sha256": "7e6e87b2e1b7ff0806ae3a836f7f49d4986bbb9149999b72947e7b782bd0cfb6"
         },
         {
           "path": "openviking_adapter.js",
           "sha256": "ea24f404ce71756a6d8f9368bad303bbd61fc28539780862e81d0a6165acddfe",
           "destination": "service/openviking_adapter.js",
-          "integration_sha256": "3e9c6b95f8b0411f0822da9dddbe72cb5d48572f3bb637139df1f28e479ebfc9"
+          "integration_sha256": "dab029d7534eaa1e76f17c6fc5781fe466c27c2754a4bcd15f2bcf8571ea4f58"
         },
         {
           "path": "openviking_agent.js",
@@ -123,7 +125,7 @@
           "path": "openviking_client.js",
           "sha256": "36ea9385c2b929960a977687d02ea40a15a628e4d89320a6e6e44a6175f6d0dd",
           "destination": "service/openviking_client.js",
-          "integration_sha256": "4026886c33e0121301db61bd7e185e09ce03a526748dcbb58c840be300483cf2"
+          "integration_sha256": "4b247998d26a38061584c31558688e978eb4ebcafae2d28d6149b29e27947ad4"
         },
         {
           "path": "openviking_consolidation.js",
@@ -133,7 +135,8 @@
         {
           "path": "openviking_entries.js",
           "sha256": "55bbaf6899a3ef74a9e81ac538cca570b00d72ab1ff1b12313e351abbefb36bc",
-          "destination": "service/openviking_entries.js"
+          "destination": "service/openviking_entries.js",
+          "integration_sha256": "55bbaf6899a3ef74a9e81ac538cca570b00d72ab1ff1b12313e351abbefb36bc"
         },
         {
           "path": "openviking_graph.js",
@@ -150,7 +153,7 @@
           "path": "openviking_runtime.js",
           "sha256": "ef94ce946ae077b47f6d8847cc440fef49fa1f97a181e5db1255740280435687",
           "destination": "service/openviking_runtime.js",
-          "integration_sha256": "afe38b7d8d24f15f68b4c6365653e21733afddf4e3d39fbe04b7f3f717b2cfc9"
+          "integration_sha256": "1de33b9af1993a944051d105073aa76c42101c0a213559c808c8dfb9233317c9"
         },
         {
           "path": "openviking_uri.js",
@@ -166,7 +169,7 @@
           "path": "scripts/build-deb.sh",
           "sha256": "f92b41476ef98444be9a06cbe1750b59235756fc81f5bb94fc91e5a3e92d7c0d",
           "destination": "scripts/build-deb.sh",
-          "integration_sha256": "89279f81fb07e05c15089a8d6b3df10cebccd7942fa33b52525484bb7bfd3624"
+          "integration_sha256": "dbd829f04ac491fe80e253d5e9991c4d546b62aa2f138a1560e68335f067ee45"
         },
         {
           "path": "scripts/build-model-deb.sh",
@@ -220,7 +223,7 @@
           "path": "scripts/nfpm.yaml",
           "sha256": "44e2dc5dcaeee141a8ab8ac4e32044ffb005c357da6d414d573654cabedb2789",
           "destination": "scripts/nfpm.yaml",
-          "integration_sha256": "83e3cd898a8f2d06e17287b552bdc021ac7e999d497134ec7701c326c712b9fa"
+          "integration_sha256": "7b66b7d9912232757db3971e5eb901b38c4e89aeabd059d93548eb03b51df75b"
         },
         {
           "path": "scripts/openviking-live-smoke.js",
@@ -231,7 +234,7 @@
           "path": "server.js",
           "sha256": "8d2ce671d5a6074ee28b9e7509092771dbf70b3ec2fbb3a7937d465667941d2a",
           "destination": "service/server.js",
-          "integration_sha256": "6248195d77ed6f083b8c4730ae1d59eabd4a28be4a4f18b900b4478b6c38750a"
+          "integration_sha256": "f95296dba028784d458d7fed29f177bb560ce27d0b5942ea890e8cc62f6a5ca7"
         },
         {
           "path": "test/agent_memory.js",
@@ -288,7 +291,7 @@
           "path": "test/openviking_graph.js",
           "sha256": "eb7f935690a128cbefca4dd47e2e210057936b4971ce86e8d63ddec580d502db",
           "destination": "service/test/openviking_graph.js",
-          "integration_sha256": "a25c9f9724e2fd1fb3aba59c46b82687e6c404d15bfcbd4d4f3213e67fe5fe4d"
+          "integration_sha256": "4f5d3d6a46d5f63ba1023182767c6eb10c24e4d554cd8cde3d7b09aed698e213"
         }
       ]
     },
@@ -18502,7 +18505,8 @@
         {
           "path": "openviking/session/memory/memory_updater.py",
           "sha256": "458b29562d9ecf03def9d52ac8522b4a75be4bc2690aa156152427626349c480",
-          "destination": "engine/openviking/session/memory/memory_updater.py"
+          "destination": "engine/openviking/session/memory/memory_updater.py",
+          "integration_sha256": "8a5a672442596aac0be16015bb8029ba392d67d526a680882c212c42c1682cdf"
         },
         {
           "path": "openviking/session/memory/merge_op/__init__.py",
@@ -18577,7 +18581,8 @@
         {
           "path": "openviking/session/memory/streaming_memory_updater.py",
           "sha256": "66d29806f25c6b59da6ee2f035caad439cc3ea012d9bae75454e73173bf6290e",
-          "destination": "engine/openviking/session/memory/streaming_memory_updater.py"
+          "destination": "engine/openviking/session/memory/streaming_memory_updater.py",
+          "integration_sha256": "c36afc1f68da1bb0fc6d7bc59352392c0d7b0b20938be707a4ac44bf11fa760f"
         },
         {
           "path": "openviking/session/memory/tools.py",
@@ -18637,7 +18642,8 @@
         {
           "path": "openviking/session/memory/utils/memory_file_utils.py",
           "sha256": "2a190fada4305fa4b3b2c5d247a0671ede2137762f7de281d8f1a517a2e0b655",
-          "destination": "engine/openviking/session/memory/utils/memory_file_utils.py"
+          "destination": "engine/openviking/session/memory/utils/memory_file_utils.py",
+          "integration_sha256": "80c22de774a8d3fb167a5cdd74559801348e0d253bcb25658a82cf71601582df"
         },
         {
           "path": "openviking/session/memory/utils/messages.py",
@@ -31844,6 +31850,16 @@
       "path": "engine/tests/server/test_mcp_fixture_lifecycle.py",
       "sha256": "b3501b07869e9be8efdec22f86dea8377c982633a6547f50e282b6acce5d888c",
       "description": "Direct MCP test request isolation and background completion regression."
+    },
+    {
+      "path": "engine/tests/session/memory/test_legacy_migration_sources.py",
+      "sha256": "d41dfb5c7bffbb130c5b149bd7f5906c73e803d87aa9d16020e156a018d4e1ed",
+      "reason": "Migration event archive source regression tests"
+    },
+    {
+      "path": "engine/openviking/session/memory/utils/migration_sources.py",
+      "sha256": "8e7974428703bf9c059c4375074bacd5b24bc4148548f872873cf57eb80ee528",
+      "reason": "Readable legacy migration event source section"
     }
   ],
   "bot_removal": {
@@ -32450,5 +32466,15 @@
         "The bootstrap invalid-config test explicitly restores and verifies OPENVIKING_CONFIG_FILE after main exports a fake --config path."
       ]
     }
-  }
+  },
+  "upstream_adaptations": [
+    {
+      "repository": "git@github.com:BvioTech/violoop-mem.git",
+      "commits": [
+        "0589b4a",
+        "8e12a92"
+      ],
+      "description": "Adapt standby drain/BGE lifecycle and extracted Debian package validation to managed OpenViking; do not import legacy GraphStore, container publishing or release versions."
+    }
+  ]
 }

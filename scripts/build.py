@@ -31,7 +31,7 @@ files.add('engine/VIOLOOP_ENGINE_VERSION')
 files.update(item['path'] for item in manifest.get('retained_files', []))
 for name in ('service', 'scripts', 'deploy', 'docs', 'tests'):
     for p in (ROOT / name).rglob('*'):
-        if p.is_file() and not any(part in {'__pycache__', 'node_modules', '.venv', '.local', 'build', 'dist', 'target'} or part.endswith('.egg-info') for part in p.relative_to(ROOT).parts) and p.suffix in {'.py', '.js', '.sh', '.sql', '.md', '.json', '.yaml', '.yml'} and not p.name.startswith('.env'):
+        if p.is_file() and not any(part in {'__pycache__', 'node_modules', '.venv', '.local', 'build', 'dist', 'target'} or part.endswith('.egg-info') for part in p.relative_to(ROOT).parts) and p.suffix in {'.py', '.js', '.cjs', '.sh', '.sql', '.md', '.json', '.yaml', '.yml'} and not p.name.startswith('.env'):
             files.add(str(p.relative_to(ROOT)))
 files.update(['.gitignore', '.dockerignore', 'package.json', 'package-lock.json', 'README.md', 'SOURCE_MANIFEST.json', 'NOTICE.md'])
 with tarfile.open(dist / f'violoop-mem-{version}-source.tar.gz', 'w:gz') as archive:

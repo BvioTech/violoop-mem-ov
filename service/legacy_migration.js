@@ -45,6 +45,7 @@ class LegacyMigration {
     this.running = false
     this.starting = false
     this.stopped = false
+    this.paused = false
     this.lastError = null
     this.timer = null
     try {
@@ -55,7 +56,13 @@ class LegacyMigration {
       }
     } catch (e) { this.loadError = e; this.lastError = { message: e.message, at: Date.now() } }
   }
+  setPaused(paused) {
+    this.paused = paused
+    if (paused) clearTimeout(this.timer)
+    else this.resume({ autoStart: true })
+  }
   resume({ autoStart = false } = {}) {
+    if (this.paused) return
     if (this.state?.started && !this.stopped && !this.loadError) {
       clearTimeout(this.timer)
       this.timer = setTimeout(() => this.run(), 0)
@@ -67,7 +74,7 @@ class LegacyMigration {
     }
   }
   async startAutomatically() {
-    if (this.stopped || this.state || this.starting || this.loadError) return
+    if (this.paused || this.stopped || this.state || this.starting || this.loadError) return
     try {
       // The managed engine may still be warming up after the adapter listens.
       if (!await this.client.ready() || !await this.client.migrationReady()) {
@@ -205,6 +212,7 @@ class LegacyMigration {
       lastRunAt: this.state?.lastRunAt || null, lastTickAt: this.lastTickAt || null }
   }
   async start() {
+    if (this.paused) throw Object.assign(new Error('Memory background is paused'), { status: 503 })
     if (this.loadError) throw this.loadError
     if (this.starting || this.running || this.state?.started) return { started: false, reason: 'busy' }
     this.starting = true
@@ -213,6 +221,7 @@ class LegacyMigration {
       if (!await this.client.ready()) throw new Error('OpenViking is not ready')
       if (!await this.client.migrationReady()) throw new Error('OpenViking runtime must be upgraded for legacy memory migration')
       if (this.stopped) throw new Error('Migration service is stopped')
+      if (this.paused) return { started: false, reason: 'paused' }
       if (!this.state) {
         const readDone = startStage(this.timingDir, 'planning', 'source.read_and_associate')
         let snapshot
@@ -261,6 +270,7 @@ class LegacyMigration {
     b.startedAt ||= Date.now()
     let receipt = await this.journal.lookup(body)
     if (['not_found', 'retryable'].includes(receipt.status)) {
+      if (this.paused) return false
       b.status = 'submitting'; this.save()
       const done = startStage(this.timingDir, b.id, 'batch.submit', { batchId: b.id, sourceTokens: b.tokens,
         attempt: b.attempt || 0, trigger: b.trigger || 'primary' })
@@ -298,7 +308,7 @@ class LegacyMigration {
     return b.status === 'completed'
   }
   async run() {
-    if (this.running || this.stopped || !this.state?.started || this.loadError) return
+    if (this.paused || this.running || this.stopped || !this.state?.started || this.loadError) return
     clearTimeout(this.timer)
     this.timer = null
     this.running = true
@@ -309,8 +319,9 @@ class LegacyMigration {
       if (this.state.batches.some(b => SKIPPED_STATUSES.has(b.status))) this.save()
       if (!await this.client.ready()) throw Object.assign(new Error('OpenViking is not ready'), { retryMigration: true })
       if (!await this.client.migrationReady()) throw Object.assign(new Error('OpenViking runtime must be upgraded for legacy memory migration'), { retryMigration: true })
+      if (this.paused) return
       this.state.lastRunAt = Date.now()
-      while (!this.stopped && this.state.started) {
+      while (!this.paused && !this.stopped && this.state.started) {
         this.lastTickAt = Date.now()
         const b = this.state.batches.find(b => b.status !== 'completed' && !SKIPPED_STATUSES.has(b.status))
         if (!b) {
@@ -351,7 +362,7 @@ class LegacyMigration {
       } else this.loadError = e // Damaged state must not be reconstructed silently.
     } finally {
       this.running = false
-      if (!this.stopped && this.state?.started && !this.loadError) {
+      if (!this.paused && !this.stopped && this.state?.started && !this.loadError) {
         const delay = this.state.nextRetryAt > this.now() ? this.state.nextRetryAt - this.now() : this.pollMs
         this.timer = setTimeout(() => this.run(), delay)
       }

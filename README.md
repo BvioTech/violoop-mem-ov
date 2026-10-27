@@ -48,6 +48,8 @@ npm run test:integration
 npm run build
 python3 scripts/build-openviking-runtime.py --replace
 npm run test:package
+# Linux ARM64 构建后自动执行，也可独立检查已有包：
+bash scripts/check-deb.sh dist/violoop-mem_<version>_arm64.deb
 ```
 
 单元/契约测试覆盖迁移、失败重试、uncertain 不重放、任务恢复、图谱增量更新、记忆 CRUD、检索与模型网关。原生集成测试启动真实 Python/C++/Rust 引擎，使用确定性模型替身；它验证工程链路，不评估模型质量。所有测试数据都在临时目录，测试结束清理，不访问当前模拟器数据。
@@ -65,3 +67,11 @@ npm run test:package
 VikingBot is omitted from this service: no Bot channels, interactive chat command, Bot proxy, or Bot feedback collector is packaged. Memory extraction, retrieval, graph projection, and native memory consolidation remain available.
 
 This service omits standalone HTML graph export, RAGAS evaluation, Gemini embeddings, NVIDIA cuVS, and Ollama integration. CPU vector storage, OpenAI-compatible model endpoints, persistent memory links, and Agent Evolution remain supported.
+
+## 设备待机
+
+支持 Device 的 `GET/POST /runtime/background`，POST 请求体为 `{"paused": true|false}`。暂停状态保存在数据目录的 `background-state.json`，重启后继续生效。先停止接收新的模型请求和记忆写入、暂停提交后续迁移批次，再等待已接受的提交及 OpenViking 全部队列完成，最后释放本地 BGE 上下文与模型。排空或恢复期间 `busy: true`；完成后 `busy: false`。已提交任务不会因待机取消，也不会重放成功或 uncertain 的迁移批次。
+
+待机时仍可浏览记忆、图谱、任务状态和健康接口；新检索、写入、整理等需要模型的请求返回 503 `background_paused`。唤醒重新加载本地 BGE，恢复迁移调度。外部 OpenViking 模式无法管理模型生命周期，控制接口明确返回 503。
+
+`.deb` 构建完成后必须通过解包运行检查：启动包内 CLI 与 Python 引擎，验证健康接口及正常退出，再用确定性模型替身验证迁移、记忆读写、检索、图谱、待机恢复和旧数据保留。只使用临时目录，不安装软件包、不运行维护脚本、不访问现有用户数据。

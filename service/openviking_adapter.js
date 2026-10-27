@@ -592,6 +592,13 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
       return json(res, err.status || 500, { error: { code: err.code || 'internal', message: err.status ? err.message : 'internal error' } })
     }
   }
+  app.setPaused = paused => migration.setPaused(paused)
+  app.drainSubmissions = async () => {
+    while (journal.pending.size || migration.starting || migration.running) {
+      await Promise.allSettled([...journal.pending.values()])
+      if (migration.starting || migration.running) await new Promise(resolve => setTimeout(resolve, 25))
+    }
+  }
   app.close = async () => { await migration.stop(); await journal.stop(); await consolidation.stop(); await graph.close() }
   app.resume = () => { journal.resume(); consolidation.resume(); return migration.resume({ autoStart: true }) }
   return app

@@ -1499,7 +1499,32 @@ def attach_source_to_request_operations(request: MemoryUpdateRequest) -> None:
     source = memory_operation_source_from_request(request)
     if source is None:
         return
+    # Resolve ranges before streaming batching can remap them. Keep only small
+    # archive references; the full original messages already live in the archive.
+    messages = list(request.messages or [])
+    migration = bool(source.archive_uri and messages) and all(
+        m.source_message_ids
+        and all(str(i).startswith("violoop-legacy-migration:") for i in m.source_message_ids)
+        for m in messages
+    )
+    context = ExtractContext(messages) if migration else None
     for op in list(getattr(request.operations, "upsert_operations", []) or []):
+        if context is not None and op.memory_type == "events":
+            try:
+                selected = context.read_message_ranges(op.memory_fields.get("ranges", ""))
+                message_ids = list(dict.fromkeys(
+                    context.chunk_meta[id(m)].source_message_id
+                    if id(m) in context.chunk_meta else m.id
+                    for group in selected.elements for m in group
+                ))
+            except (ValueError, TypeError, AttributeError):
+                message_ids = []
+            if message_ids:
+                op.memory_fields["migration_source"] = {
+                    "version": 1,
+                    "archive_uri": source.archive_uri,
+                    "message_ids": message_ids,
+                }
         if getattr(op, "source", None) is None:
             op.source = source
         source_extraction_id = getattr(op.source, "extraction_id", None)
