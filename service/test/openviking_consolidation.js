@@ -86,14 +86,37 @@ test('graph sync failure retries projection only, preserving the completed nativ
   assert.equal(f.service.status().lastError, null)
 })
 
-test('unknown submission outcome is not resubmitted, including after restart', async t => {
+test('unconfirmed consolidation submissions fail and allow exactly one new task per manual click', async t => {
   const f = fixture(t)
   f.client.consolidateMemories = async () => { f.submitted++; throw new Error('lost response') }
   await assert.rejects(f.service.start(), /lost response/)
-  assert.equal(f.service.status().blocked, true)
-  await assert.rejects(f.service.start(), /unknown/)
+  assert.equal(f.service.status().blocked, false)
+  assert.equal(f.service.status().phase, 'failed')
+  assert.match(f.service.status().lastError.message, /lost response/)
   await f.service.stop(); f.service = f.make(); f.service.resume()
-  assert.equal(f.service.status().blocked, true); assert.equal(f.submitted, 1)
+  assert.equal(f.service.status().phase, 'failed'); assert.equal(f.submitted, 1)
+  await assert.rejects(f.service.start(), /lost response/)
+  assert.equal(f.submitted, 2)
+})
+
+test('interrupted consolidation submissions become failed on restart without automatic resubmission', async t => {
+  const f = fixture(t)
+  f.service.state = { version: 1, scope: f.service.scope, target: f.service.target, status: 'submitting' }
+  f.service.save(); await f.service.stop(); f.service = f.make(); f.service.resume()
+  assert.equal(f.service.status().phase, 'failed')
+  assert.equal(f.service.status().blocked, false); assert.equal(f.submitted, 0)
+  await f.service.start(); assert.equal(f.submitted, 1)
+})
+
+test('a missing consolidation task becomes failed and a later manual click can start another task', async t => {
+  const f = fixture(t)
+  await f.service.start()
+  f.client.task = async () => { throw Object.assign(new Error('missing'), { upstreamStatus: 404 }) }
+  await f.service.poll()
+  assert.equal(f.service.status().phase, 'failed')
+  assert.equal(f.service.status().running, false); assert.equal(f.service.status().blocked, false)
+  f.service.resume(); assert.equal(f.submitted, 1)
+  await f.service.start(); assert.equal(f.submitted, 2)
 })
 
 test('a definitive native rejection allows a later manual retry; scope mismatch does not', async t => {

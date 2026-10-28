@@ -604,7 +604,7 @@ test('fact-only device evidence is passed to native extraction; ambiguous writes
   const count = calls.length
   const retry = await request('POST', '/v2/ingest', failedBody)
   assert.equal(retry.status, 409)
-  assert.equal(retry.body.error.code, 'ingest_uncertain')
+  assert.equal(retry.body.error.code, 'ingest_failed')
   assert.equal(calls.length, count)
 })
 
@@ -640,8 +640,9 @@ test('commit failure after written messages remains inspectable without replayin
   assert.equal((await request('POST', '/v2/ingest', body)).status, 409)
   assert.equal(calls.length, count)
   const status = await request('GET', '/v2/ingests/' + record.id)
-  assert.equal(status.body.status, 'uncertain')
+  assert.equal(status.body.status, 'failed')
   assert.equal(status.body.messagesWritten, 1)
+  assert.match(status.body.error, /native extraction failed/)
 })
 
 test('oversized requests return a JSON 413 without closing the connection prematurely', async () => {

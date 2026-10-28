@@ -52,19 +52,19 @@ Device 复用现有 `/llm/key` 流程，用当前登录用户和设备身份领�
 
 `<Memory数据目录>/legacy-migration/state.json` 保存资源覆盖、固定批次索引、任务状态和用户已启动标志，`batches/<hash>.json` 保存每次固定请求。文件 0600，目录 0700；更新用临时文件、fsync、rename。部署与备份保留整个目录以及原生工作区和 `openviking-adapter/ingests`。
 
-accepted 只表示提交。只有原生 completed 才减少未处理数量，零产出也完成。重启后继续已启动的任务；失去响应时通过本次尝试的原请求 hash 查询 journal，确认 not_found/retryable 才重发同一请求。failed/uncertain 先保留原状态和错误，跳过该批继续后续批次；cancelled 仍暂停整轮。原生任务过期时可从归档 .done / .failed.json 恢复终态。状态文件或原始/补跑输入损坏、目标 scope 改变会拒绝沿用状态，不能删除状态目录作为失败重试手段。
+accepted 只表示提交。只有原生 completed 才减少未处理数量，零产出也完成。重启后继续已启动的任务；失去响应时通过本次尝试的原请求 hash 查询 journal，确认 not_found/retryable 才重发同一请求。failed 保留错误原因，跳过该批继续后续批次；写入或提交结果未确认、原任务与归档终态都缺失时也统一视为 failed；cancelled 仍暂停整轮。原生任务过期时可从归档 .done / .failed.json 恢复终态。状态文件或原始/补跑输入损坏、目标 scope 改变会拒绝沿用状态，不能删除状态目录作为失败重试手段。
 
-问题批次同时写入进度文件同目录下的 `issues.json`，记录批次编号、批次 ID、尝试序号/触发方式、failed/uncertain 状态、错误原因、首次记录时间、任务 ID、提交 ID、输入 token 数和来源分组。`batches` 是当前未解决的问题，`history` 保留之前失败的尝试；成功补跑后也不删除历史。轮询和重启不会重复追加同一次失败。先持久化问题记录再保存进度，文件使用与 state.json 相同的 0600 权限和原子写入方式。
+问题批次同时写入进度文件同目录下的 `issues.json`，记录批次编号、批次 ID、尝试序号/触发方式、failed 状态、错误原因、首次记录时间、任务 ID、提交 ID、输入 token 数和来源分组。`batches` 是当前未解决的问题，`history` 保留之前失败的尝试；成功补跑后也不删除历史。轮询和重启不会重复追加同一次失败。先持久化问题记录再保存进度，文件使用与 state.json 相同的 0600 权限和原子写入方式。
 
 ### 自动补跑与手动补跑
 
-主迁移处理完所有可继续的批次后，仅将可重试的 `failed` 批次自动补跑，最多 3 轮，即首次执行加最多 3 次补跑。三轮分别等待 10、30、60 秒；等待截止时间和已用轮数持久化，重启不会重置等待或额度，等待期间重复点击返回 busy。批次内部仍沿用原有模型重试，不计入这 3 轮。`uncertain` 不自动或手动重放，必须单独核实原任务。明确的认证、权限、请求参数错误（例如 HTTP 400/401/403/422 或对应错误类型）不自动补跑；上游调用直接返回这类错误时暂停当前运行，修复后可手动继续。未知原因的明确失败仍受 3 轮上限约束。补跑结束仍失败时，`running` 为 false，但相关来源仍计入 `pendingCount`，最近一个未解决问题通过 `lastError` 保留可见。
+主迁移处理完所有可继续的批次后，仅将可重试的 `failed` 批次自动补跑，最多 3 轮，即首次执行加最多 3 次补跑。三轮分别等待 10、30、60 秒；等待截止时间和已用轮数持久化，重启不会重置等待或额度，等待期间重复点击返回 busy。批次内部仍沿用原有模型重试，不计入这 3 轮。提交结果未确认的失败与其他可重试失败共用同一份三轮额度，不再使用独立状态；显式重试创建新会话身份，可能与原任务产生重复记忆。明确的认证、权限、请求参数错误（例如 HTTP 400/401/403/422 或对应错误类型）不自动补跑；上游调用直接返回这类错误时暂停当前运行，修复后可手动继续。未知原因的明确失败仍受 3 轮上限约束。补跑结束仍失败时，`running` 为 false，但相关来源仍计入 `pendingCount`，最近一个未解决问题通过 `lastError` 保留可见。
 
 之后点击“重试失败批次”（`POST /v2/migration/start {}`），只为当前 failed 批次创建一轮手动补跑，不再附带新的自动补跑额度。已完成批次不重跑。已有旧版本的结束状态也可以这样补跑，不需要清理状态或产出。升级时仍在主轮的旧迁移可采用新的 3 轮策略；旧版本已安排的自动轮次保留原完成标记，已经结束或暂停的旧迁移不会因升级被擅自启动。
 
 每次补跑复制原始输入到 `retries/<batchId>/<attempt>.json`。仅追加新的 episode.sessionId 后缀 `-retry-<attempt>`；原始 messages（内容、来源 ID、createdAt）、批次边界、token 数和资源覆盖均不变。新提交因此获得独立 ingest ID、原生任务和会话归档，旧 journal 的 failed 结果和原生 `.failed.json` 都保留。OpenViking 的正常检索和合并流程继续生效，但这不是逐写入事务恢复，不能保证部分产出绝无重复。
 
-state.json 中每个批次的 `attempt`（0 为首次）表示当前尝试，`attempts` 保留之前尝试的结果、错误、任务/提交 ID 和起止时间。补跑计划及轮次先原子持久化，再提交；重复点击返回 busy，重启复用已保存的本次请求，不重新创建尝试。迁移状态接口提供 `phase`（primary / automatic-retry / manual-retry）、`automaticRetryDone`、`automaticRetryCount`、`automaticRetryLimit`（3）、`nextRetryAt`、`totalBatches`、`failedBatches`、`uncertainBatches`。不修改或删除旧版 graph.db、条目记忆及原始输入。
+state.json 中每个批次的 `attempt`（0 为首次）表示当前尝试，`attempts` 保留之前尝试的结果、错误、任务/提交 ID 和起止时间。补跑计划及轮次先原子持久化，再提交；重复点击返回 busy，重启复用已保存的本次请求，不重新创建尝试。迁移状态接口提供 `phase`（primary / automatic-retry / manual-retry）、`automaticRetryDone`、`automaticRetryCount`、`automaticRetryLimit`（3）、`nextRetryAt`、`totalBatches`、`failedBatches`。不修改或删除旧版 graph.db、条目记忆及原始输入。
 
 同一迁移一次只处理一个可继续的未完成批次。页面只显示按旧条目、实体、关系记录计算的未处理数量；实体的部分事实完成不会提前将整个实体记为完成。
 

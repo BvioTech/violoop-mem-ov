@@ -4,7 +4,7 @@ const { readLegacySnapshot, hash } = require('./legacy_source')
 const { writeJson } = require('./durable_json')
 const { startStage, appendTiming } = require('./migration_timing')
 
-const SKIPPED_STATUSES = new Set(['failed', 'uncertain'])
+const SKIPPED_STATUSES = new Set(['failed'])
 const AUTOMATIC_RETRY_DELAYS_MS = Object.freeze([10000, 30000, 60000])
 const PERMANENT_HTTP_STATUSES = new Set([400, 401, 403, 404, 405, 413, 415, 422])
 
@@ -189,7 +189,7 @@ class LegacyMigration {
       if (!fs.existsSync(this.sourceFile)) {
         return { backend: 'openviking', migration: true, enabled: true,
           pendingCount: 0, running: false, lastError: null, sourceAvailable: false,
-          initialized: false, totalBatches: 0, completedBatches: 0, failedBatches: 0, uncertainBatches: 0 }
+          initialized: false, totalBatches: 0, completedBatches: 0, failedBatches: 0 }
       }
       if (this.inventoryCount === undefined) {
         const s = readLegacySnapshot(this.sourceFile)
@@ -208,7 +208,6 @@ class LegacyMigration {
       totalBatches: this.state?.batches.length || 0,
       completedBatches: this.state?.batches.filter(b => b.status === 'completed').length || 0,
       failedBatches: this.state?.batches.filter(b => b.status === 'failed').length || 0,
-      uncertainBatches: this.state?.batches.filter(b => b.status === 'uncertain').length || 0,
       lastRunAt: this.state?.lastRunAt || null, lastTickAt: this.lastTickAt || null }
   }
   async start() {
@@ -253,7 +252,7 @@ class LegacyMigration {
       const runnable = this.state.batches.some(b => b.status !== 'completed' && !SKIPPED_STATUSES.has(b.status))
       if (!runnable) {
         if (this.state.batches.some(b => b.status === 'failed')) retriedBatches = this.prepareRetries('manual-retry')
-        else return { started: false, reason: this.state.batches.some(b => b.status === 'uncertain') ? 'uncertain_requires_review' : 'complete' }
+        else return { started: false, reason: 'complete' }
       }
       this.state.phase ||= 'primary' // Resume in-progress states from older releases.
       this.state.started = true
@@ -280,12 +279,10 @@ class LegacyMigration {
     b.ingestId = receipt.ingestId
     b.taskId = receipt.taskId
     b.status = receipt.status === 'completed' ? 'completed' : 'submitted'
-    if (['uncertain', 'failed', 'cancelled'].includes(receipt.status)) {
+    if (['failed', 'cancelled'].includes(receipt.status)) {
       b.status = receipt.status
       const taskError = receipt.task?.error || receipt.task?.result?.error || receipt.error
-      b.error = (typeof taskError === 'object' ? JSON.stringify(taskError) : taskError) || (receipt.status === 'uncertain'
-        ? `Upstream write outcome unknown${receipt.phase ? ` (${receipt.phase})` : ''}${b.lastAttemptError ? `; last error: ${b.lastAttemptError.message}` : ''}`
-        : receipt.status)
+      b.error = (typeof taskError === 'object' ? JSON.stringify(taskError) : taskError) || receipt.status
       if (receipt.status === 'failed') b.retryable = ![receipt.task, receipt.task?.result, taskError].some(permanentFailure)
       b.finishedAt = Date.now()
       this.save()
@@ -350,7 +347,7 @@ class LegacyMigration {
         }
         // Network recovery re-checks this exact durable attempt. Failed batches
         // only get fresh identities at a retry-round boundary, never here.
-        // Uncertain writes stay skipped; cancellation pauses the whole run.
+        // Submission failures use the same bounded retry rounds; cancellation pauses the run.
         break
       }
     } catch (e) {

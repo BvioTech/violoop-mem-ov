@@ -52,7 +52,7 @@ npm run test:package
 bash scripts/check-deb.sh dist/violoop-mem_<version>_arm64.deb
 ```
 
-单元/契约测试覆盖迁移、失败重试、uncertain 不重放、任务恢复、图谱增量更新、记忆 CRUD、检索与模型网关。原生集成测试启动真实 Python/C++/Rust 引擎，使用确定性模型替身；它验证工程链路，不评估模型质量。所有测试数据都在临时目录，测试结束清理，不访问当前模拟器数据。
+单元/契约测试覆盖迁移、失败重试、提交结果未确认按失败处理、任务恢复、图谱增量更新、记忆 CRUD、检索与模型网关。原生集成测试启动真实 Python/C++/Rust 引擎，使用确定性模型替身；它验证工程链路，不评估模型质量。所有测试数据都在临时目录，测试结束清理，不访问当前模拟器数据。
 
 构建生成 OpenViking wheel 与完整服务源码归档。设备 `.deb` 必须在 Debian 12 ARM64 + Node 24 + Python 3.11 环境执行 `npm run build:deb`；不在 Mac 上生成冒充 ARM64 Linux 的包。所有构建产物均忽略，无自动发布。
 
@@ -60,7 +60,7 @@ bash scripts/check-deb.sh dist/violoop-mem_<version>_arm64.deb
 
 默认只读读取数据目录内的 `graph.db`，也可显式指定 `VIOLOOP_LEGACY_MEMORY_DB`。新记忆写入 `openviking/`，迁移进度写入 `legacy-migration/`，可重建图谱写入 `openviking-graph.db`。迁移不会删除旧文件或旧数据库，成功后也不自动清理。卸载或 purge 同样保留记忆数据。
 
-首次就绪自动迁移。失败最多自动重试三轮（10/30/60 秒）；已成功批次不会重放。请求结果不确定的批次保持 uncertain，不自动重新提交。手动入口及 Device/PC HTTP 协议保持兼容。Identity/Soul 模板由运行配置禁用；不会自动删除历史文件。
+首次就绪自动迁移。失败最多自动重试三轮（10/30/60 秒）；已成功批次不会重放。提交结果未确认、任务及归档结果缺失的批次统一按 failed 处理，共用三轮自动重试额度；每次手动重试只补跑一轮。手动入口及 Device/PC HTTP 协议保持兼容。Identity/Soul 模板由运行配置禁用；不会自动删除历史文件。
 
 详细接口见 `docs/agent-memory.md`、`docs/legacy-memory-migration.md`。来源及许可见 `NOTICE.md` 和 `engine/LICENSE`。
 
@@ -70,7 +70,7 @@ This service omits standalone HTML graph export, RAGAS evaluation, Gemini embedd
 
 ## 设备待机
 
-支持 Device 的 `GET/POST /runtime/background`，POST 请求体为 `{"paused": true|false}`。暂停状态保存在数据目录的 `background-state.json`，重启后继续生效。先停止接收新的模型请求和记忆写入、暂停提交后续迁移批次，再等待已接受的提交及 OpenViking 全部队列完成，最后释放本地 BGE 上下文与模型。排空或恢复期间 `busy: true`；完成后 `busy: false`。已提交任务不会因待机取消，也不会重放成功或 uncertain 的迁移批次。
+支持 Device 的 `GET/POST /runtime/background`，POST 请求体为 `{"paused": true|false}`。暂停状态保存在数据目录的 `background-state.json`，重启后继续生效。先停止接收新的模型请求和记忆写入、暂停提交后续迁移批次，再等待已接受的提交及 OpenViking 全部队列完成，最后释放本地 BGE 上下文与模型。排空或恢复期间 `busy: true`；完成后 `busy: false`。已提交任务不会因待机取消，不会重放成功的迁移批次；失败批次仅按迁移重试额度补跑。
 
 待机时仍可浏览记忆、图谱、任务状态和健康接口；新检索、写入、整理等需要模型的请求返回 503 `background_paused`。唤醒重新加载本地 BGE，恢复迁移调度。外部 OpenViking 模式无法管理模型生命周期，控制接口明确返回 503。
 

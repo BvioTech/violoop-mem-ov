@@ -108,7 +108,7 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
   await until(async () => (await req('GET', '/readyz')).ready)
   await until(async () => {
     const state = await req('GET', '/v2/migration/status')
-    if (state.failedBatches || state.uncertainBatches) throw new Error(JSON.stringify(state))
+    if (state.failedBatches) throw new Error(JSON.stringify(state))
     return state.pendingCount === 0 && extractionCalls > 0
   })
   assert.equal(digest(file), before)

@@ -1,5 +1,5 @@
 // Manual native memory consolidation. Persist the task receipt before polling;
-// never resubmit an uncertain POST or a task restored after adapter restart.
+// failed submissions can be retried manually; accepted tasks resume after restart.
 const fs = require('fs')
 const path = require('path')
 const { createHash } = require('crypto')
@@ -17,11 +17,11 @@ class MemoryConsolidation {
       if (fs.existsSync(this.file)) {
         this.state = JSON.parse(fs.readFileSync(this.file, 'utf8'))
         if (this.state.version !== 1 || this.state.scope !== this.scope || this.state.target !== this.target) throw new Error('Consolidation state belongs to another memory scope')
-        if (!ACTIVE.has(this.state.status) && !TERMINAL.has(this.state.status) && this.state.status !== 'uncertain') throw new Error('Invalid consolidation state')
+        if (!ACTIVE.has(this.state.status) && !TERMINAL.has(this.state.status)) throw new Error('Invalid consolidation state')
         if (ACTIVE.has(this.state.status) && this.state.status !== 'submitting' && typeof this.state.taskId !== 'string') throw new Error('Consolidation task ID is missing')
         if (this.state.status === 'submitting') {
-          this.state.status = 'uncertain'
-          this.state.error = 'Consolidation submission outcome is unknown; inspect native tasks before retrying'
+          this.state.status = 'failed'
+          this.state.error = 'Consolidation submission result was not confirmed'
           this.save()
         }
       }
@@ -31,7 +31,7 @@ class MemoryConsolidation {
   status() {
     const s = this.state
     return { enabled: !this.loadError, kind: 'native', running: !this.loadError && !!s && (ACTIVE.has(s.status) || !!s.graphPending),
-      blocked: !!this.loadError || s?.status === 'uncertain', phase: s?.status || 'idle', taskId: s?.taskId || null,
+      blocked: !!this.loadError, phase: s?.status || 'idle', taskId: s?.taskId || null,
       lastRunAt: s?.startedAt || null, nextDueAt: null, dirtyCount: null,
       result: s?.result || null,
       lastError: this.loadError || s?.error ? { message: this.loadError || s.error, at: s?.updatedAt || null } : null }
@@ -39,16 +39,14 @@ class MemoryConsolidation {
   async start() {
     if (this.stopped) throw new Error('Consolidation service is stopped')
     const current = this.status()
-    if (current.blocked) throw Object.assign(new Error(current.lastError.message), { status: 409, code: 'consolidation_uncertain' })
+    if (current.blocked) throw Object.assign(new Error(current.lastError.message), { status: 409, code: 'consolidation_invalid_state' })
     if (current.running) return { started: false, reason: 'busy', taskId: current.taskId }
     // Persist intent synchronously before awaiting readiness, serializing clicks.
     this.state = { version: 1, scope: this.scope, target: this.target, status: 'submitting', startedAt: Date.now(), updatedAt: Date.now() }
     this.save()
-    let posted = false
     try {
       if (!await this.client.ready()) throw new Error('OpenViking is not ready')
       if (this.stopped) throw new Error('Consolidation service is stopped')
-      posted = true
       const task = await this.client.consolidateMemories(this.target)
       if (typeof task?.task_id !== 'string' || !task.task_id) throw new Error('Native consolidation did not return a task ID')
       this.state.taskId = task.task_id
@@ -56,10 +54,8 @@ class MemoryConsolidation {
       this.schedule()
       return { started: true, taskId: task.task_id }
     } catch (e) {
-      const rejected = [400, 401, 403, 404, 405, 409, 422].includes(e.upstreamStatus)
-      this.state.status = posted && !rejected ? 'uncertain' : 'failed'
-      this.state.error = this.state.status === 'uncertain'
-        ? 'Consolidation submission outcome is unknown; inspect native tasks before retrying' : e.message
+      this.state.status = 'failed'
+      this.state.error = e.message
       this.state.updatedAt = Date.now(); this.save()
       throw e
     }
@@ -95,7 +91,7 @@ class MemoryConsolidation {
       try { task = await this.client.task(s.taskId) }
       catch (e) {
         if (e.upstreamStatus === 404) {
-          s.status = 'uncertain'; s.error = 'Native consolidation task is missing; inspect the native task before retrying'
+          s.status = 'failed'; s.error = 'Native consolidation task is missing'
           s.updatedAt = Date.now(); this.save(); return
         }
         throw e
