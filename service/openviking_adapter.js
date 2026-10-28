@@ -273,12 +273,16 @@ class IngestJournal {
     }
     if (record.terminal) {
       if (await this.finish(record)) this.watching.delete(id)
-      return { ...record.result, ...record.terminal }
+      // Older journals did not distinguish an absent task from a confirmed
+      // native failure. Preserve the no-replay rule across an upgrade too.
+      const task = record.terminal.task
+      const unconfirmed = task?.unconfirmed || task?.error === 'Native task missing and no terminal archive marker found'
+      return { ...record.result, ...record.terminal, retryable: !unconfirmed && record.terminal.retryable !== false }
     }
     let task
     try { task = await this.client.task(record.result.taskId) } catch (e) {
       if (e.upstreamStatus !== 404) throw e
-      task = { status: 'failed', error: 'Native task missing and no terminal archive marker found' }
+      task = { status: 'failed', unconfirmed: true, error: 'Native task missing and no terminal archive marker found' }
       if (record.result.archiveUri) for (const [file, state, field] of [
         ['.done', 'completed', 'ending_message_id'], ['.failed.json', 'failed', 'error'],
       ]) {
@@ -289,11 +293,11 @@ class IngestJournal {
       }
     }
     if (['completed', 'failed', 'cancelled'].includes(task.status)) {
-      record.terminal = { status: task.status, task }
+      record.terminal = { status: task.status, task, retryable: !task.unconfirmed }
       this.save(record)
       if (await this.finish(record)) this.watching.delete(id)
     }
-    return { ...record.result, status: task.status, task }
+    return { ...record.result, status: task.status, task, retryable: !task.unconfirmed }
   }
 }
 
@@ -602,10 +606,13 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     }
   }
   app.setPaused = paused => migration.setPaused(paused)
-  app.drainSubmissions = async () => {
-    while (journal.pending.size || migration.starting || migration.running) {
+  app.drainSubmissions = async ({ isCancelled = () => false } = {}) => {
+    // Native compile/memory runs outside QueueFS. Wait for its terminal task
+    // before system/wait drains the indexing work it can still enqueue.
+    while (!isCancelled() && (journal.pending.size || migration.starting || migration.running || consolidation.status().running)) {
       await Promise.allSettled([...journal.pending.values()])
-      if (migration.starting || migration.running) await new Promise(resolve => setTimeout(resolve, 25))
+      if (consolidation.status().running) await consolidation.poll()
+      if (!isCancelled() && (migration.starting || migration.running || consolidation.status().running)) await new Promise(resolve => setTimeout(resolve, 25))
     }
   }
   app.close = async () => { await migration.stop(); await journal.stop(); await consolidation.stop(); await graph.close() }

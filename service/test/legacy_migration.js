@@ -539,7 +539,14 @@ test('missing task with no archive is a durable failure and duplicate status che
   const journal = new IngestJournal(client, dir)
   await journal.ingest(body)
   assert.equal((await journal.lookup(body)).status, 'failed')
-  assert.equal((await new IngestJournal(client, dir).lookup(body)).status, 'failed')
+  assert.equal((await journal.lookup(body)).retryable, false)
+  const reopened = new IngestJournal(client, dir)
+  assert.equal((await reopened.lookup(body)).status, 'failed')
+  // Receipts persisted by the initial release lacked the unconfirmed flag.
+  const record = reopened.read((await reopened.lookup(body)).ingestId)
+  delete record.terminal.retryable; delete record.terminal.task.unconfirmed
+  reopened.save(record)
+  assert.equal((await reopened.lookup(body)).retryable, false)
   assert.equal(writes, 1); assert.equal(commits, 1); assert.equal(polls, 1)
 })
 

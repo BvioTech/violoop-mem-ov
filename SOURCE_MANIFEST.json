@@ -9,7 +9,7 @@
           "path": "config.js",
           "sha256": "6cea5346c29fc6f68ac0ce90f1cf1a288540353d133fb8dcd2c2f0752a352552",
           "destination": "service/config.js",
-          "integration_sha256": "e93ed7d53df1cc00c5ea7369eb44fafbdb4014ce6fd281f298ae1da9f9a4086f"
+          "integration_sha256": "4901c97c9074020004e7e224679e0716cb6a36b08e97be06cbe2f016705f39b1"
         },
         {
           "path": "deploy/openviking-adapter.yaml",
@@ -49,7 +49,7 @@
           "path": "docs/managed-deployment.md",
           "sha256": "c7eb9c41f6ea1ce185beb556ca02a35e352e867108268d4f1c1670f8577eaaca",
           "destination": "docs/managed-deployment.md",
-          "integration_sha256": "10509f484440a7c902f2edfd83b72330661f82faef586936d6393801e6256608"
+          "integration_sha256": "8b02cc4a3e740dec420c0727974ad450004b0ebed18c1cb5dfb8a6b0f52df4fd"
         },
         {
           "path": "durable_json.js",
@@ -114,7 +114,7 @@
           "path": "openviking_adapter.js",
           "sha256": "ea24f404ce71756a6d8f9368bad303bbd61fc28539780862e81d0a6165acddfe",
           "destination": "service/openviking_adapter.js",
-          "integration_sha256": "dab029d7534eaa1e76f17c6fc5781fe466c27c2754a4bcd15f2bcf8571ea4f58"
+          "integration_sha256": "ce0a730dacb1eb8e1e48285f0caf97677904cd3a03f658a389c20510ea5e37fc"
         },
         {
           "path": "openviking_agent.js",
@@ -252,13 +252,13 @@
           "path": "test/legacy_migration.js",
           "sha256": "c2195ba0acc1b1e27a8ed5ebfdea5a24951e7abfbb1cc1f925de88c4b81fac4c",
           "destination": "service/test/legacy_migration.js",
-          "integration_sha256": "f6a7059e8fb6939690911aa6e605e167b5211545ede05e55d4264fd9928a8f78"
+          "integration_sha256": "77cab9f01055ed6d192daba3b5aeb8d0e97a4b3fb5b45d45199023ba705ad956"
         },
         {
           "path": "test/managed.js",
           "sha256": "84ac57b635c32f44078d8e338e40f4d143c45e7211ab03079f89f48749346ba0",
           "destination": "service/test/managed.js",
-          "integration_sha256": "4db1e538316852ccb00ec5446f02821c41f30310e29314bf7f8ce6b9b2a2fa4f"
+          "integration_sha256": "b01f1b49bf9d93c12f671d854e16037dafdc641329bcf40b86255cec76ebf286"
         },
         {
           "path": "test/migration_embedding.js",

@@ -38,12 +38,17 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
   const httpHost = args['http-host'] || env.QMD_HTTP_HOST || fileCfg.http_host || '127.0.0.1'
 
   const embeddingCfg = (fileCfg.embedding && !Array.isArray(fileCfg.embedding)) ? fileCfg.embedding : {}
+  const repoRoot = path.resolve(__dirname, '..')
+  const bundledPython = path.resolve(repoRoot, '../runtime/python', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
+  const sourcePython = path.join(repoRoot, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
+  const pythonPath = [path.join(repoRoot, 'openviking-python'), path.join(repoRoot, 'engine')]
+    .find(dir => fs.existsSync(path.join(dir, 'openviking/server/bootstrap.py')))
   return {
     backend: args.backend || env.VIOLOOP_MEM_OV_BACKEND || fileCfg.backend || 'openviking',
     openviking: {
       mode: args['openviking-mode'] || env.OPENVIKING_MODE || fileCfg.openviking?.mode || 'managed',
-      python: env.OPENVIKING_PYTHON || (fs.existsSync(path.join(__dirname, '../.venv/bin/python')) ? path.join(__dirname, '../.venv/bin/python') : '/usr/bin/python3'),
-      pythonPath: env.OPENVIKING_PYTHONPATH || (fs.existsSync(path.join(__dirname, '../engine/openviking/server/bootstrap.py')) ? path.join(__dirname, '../engine') : '/opt/violoop-mem-ov/openviking-python'),
+      python: env.OPENVIKING_PYTHON || [bundledPython, sourcePython].find(file => fs.existsSync(file)) || '/usr/bin/python3',
+      pythonPath: env.OPENVIKING_PYTHONPATH || pythonPath || '/opt/violoop-mem-ov/openviking-python',
       runtimeDir: env.OPENVIKING_RUNTIME_DIR || path.dirname(socket),
       deviceModelUrl: env.OPENVIKING_DEVICE_MODEL_URL || 'http://127.0.0.1:9090/internal/memory/chat/completions',
       llmMaxTokens: Number(env.OPENVIKING_LLM_MAX_TOKENS || 4096),

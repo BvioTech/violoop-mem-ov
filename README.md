@@ -80,7 +80,7 @@ This service omits standalone HTML graph export, RAGAS evaluation, Gemini embedd
 
 ## 设备待机
 
-支持 Device 的 `GET/POST /runtime/background`，POST 请求体为 `{"paused": true|false}`。暂停状态保存在数据目录的 `background-state.json`，重启后继续生效。先停止接收新的模型请求和记忆写入、暂停提交后续迁移批次，再等待已接受的提交及 OpenViking 全部队列完成，最后释放本地 BGE 上下文与模型。排空或恢复期间 `busy: true`；完成后 `busy: false`。已提交任务不会因待机取消，不会重放成功的迁移批次；失败批次仅按迁移重试额度补跑。
+支持 Device 的 `GET/POST /runtime/background`，POST 请求体为 `{"paused": true|false}`。暂停状态保存在数据目录的 `background-state.json`，重启后继续生效。先停止接收新的记忆操作、暂停提交后续迁移批次，再等待已接受的提交、原生记忆整理任务（`compile/memory`）及 OpenViking 全部队列完成，最后停用模型网关并释放本地 BGE 上下文与模型。排空期间已接受任务仍可继续调用模型。排空或恢复期间 `busy: true`；完成后 `busy: false`。已提交任务不会因待机取消，不会重放成功的迁移批次；失败批次仅按迁移重试额度补跑。
 
 待机时仍可浏览记忆、图谱、任务状态和健康接口；新检索、写入、整理等需要模型的请求返回 503 `background_paused`。唤醒重新加载本地 BGE，恢复迁移调度。外部 OpenViking 模式无法管理模型生命周期，控制接口明确返回 503。
 
