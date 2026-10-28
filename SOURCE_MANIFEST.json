@@ -25163,7 +25163,8 @@
         {
           "path": "tests/unit/test_volcengine_embedder_input.py",
           "sha256": "867a93ce09883f27fe53d143e46dca6bcda0465aa7d014d28e61e9b9b013e4ee",
-          "destination": "engine/tests/unit/test_volcengine_embedder_input.py"
+          "destination": "engine/tests/unit/test_volcengine_embedder_input.py",
+          "integration_sha256": "4aed2805f0d21aca49d6432dd9814e06c265a52dcbb2db5d6f7fd997246ff166"
         },
         {
           "path": "tests/unit/test_voyage_embedder.py",
