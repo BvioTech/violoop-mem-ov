@@ -35,8 +35,8 @@ def test_hybrid_embedder_downgrades_multimodal_input_to_text(_mock_ark):
 
 
 @patch("openviking.models.embedder.volcengine_embedders.volcenginesdkarkruntime.Ark")
-@patch("openviking.models.embedder.volcengine_embedders.time.perf_counter")
-def test_dense_embedder_passes_local_provider_duration_to_metrics(mock_perf_counter, mock_ark):
+@patch("openviking.models.embedder.volcengine_embedders.time", spec=["perf_counter"])
+def test_dense_embedder_passes_local_provider_duration_to_metrics(mock_clock, mock_ark):
     """Embedding call duration must come from this SDK request, not shared embedder state."""
     response = SimpleNamespace(
         usage=SimpleNamespace(prompt_tokens=3, total_tokens=3),
@@ -45,7 +45,9 @@ def test_dense_embedder_passes_local_provider_duration_to_metrics(mock_perf_coun
     client = MagicMock()
     client.embeddings.create.return_value = response
     mock_ark.return_value = client
-    mock_perf_counter.side_effect = [100.0, 100.25]
+    # Replace only this module's clock, not the shared time module used by
+    # telemetry initialization and other callers.
+    mock_clock.perf_counter.side_effect = [100.0, 100.25]
 
     embedder = VolcengineDenseEmbedder(
         model_name="test", api_key="test-key", input_type="text", dimension=2
@@ -54,4 +56,6 @@ def test_dense_embedder_passes_local_provider_duration_to_metrics(mock_perf_coun
 
     embedder.embed("hello")
 
+    embedder.update_token_usage.assert_called_once()
     assert embedder.update_token_usage.call_args.kwargs["duration_seconds"] == 0.25
+    assert mock_clock.perf_counter.call_count == 2
