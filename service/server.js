@@ -42,17 +42,47 @@ async function start(config, { runtimeOptions } = {}) {
   const runtime = mode === 'managed' ? await require('./openviking_runtime').startRuntime(config, runtimeOptions) : null
   const client = new OpenVikingClient({ ...config.openviking, ...(runtime ? { apiKey: runtime.engineKey } : {}) })
   const nativeReady = client.ready.bind(client)
+  let background
   if (runtime) client.ready = async () => !!runtime.status().pid
-    && runtime.embedder.status().state === 'ready' && runtime.embedder.status().dim === 1024 && await nativeReady()
+    && (background?.paused || (runtime.embedder.status().state === 'ready' && runtime.embedder.status().dim === 1024)) && await nativeReady()
   if (runtime) {
     const nativeMigrationReady = client.migrationReady.bind(client)
     client.migrationReady = async () => await nativeMigrationReady() && await runtime.modelReady()
   }
   const app = createApp(client, { dataDir: config.dataDir, ...config.openviking })
-  const handler = (req, res) => {
+  if (runtime) {
+    try { background = new (require('./background').BackgroundControl)({ dataDir: config.dataDir, app, client, runtime }) }
+    catch (err) { await app.close(); await runtime.stop(); throw err }
+  }
+  const handler = async (req, res) => {
+    const route = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '')
+    if (route === '/runtime/background') {
+      try {
+        if (!background) throw Object.assign(new Error('Background control requires managed OpenViking'), { status: 503 })
+        let state
+        if (req.method === 'GET') state = background.status()
+        else if (req.method === 'POST') state = background.setPaused((await require('./model_gateway').readBody(req, 4096))?.paused)
+        else throw Object.assign(new Error('Method not allowed'), { status: 405 })
+        res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify(state))
+      } catch (err) {
+        res.writeHead(err.status || 500, { 'content-type': 'application/json' })
+        return res.end(JSON.stringify({ error: { code: err.code || 'background_unavailable', message: err.message } }))
+      }
+    }
     if (runtime && req.method === 'GET' && req.url === '/runtimez') {
       res.writeHead(200, { 'content-type': 'application/json' })
       return res.end(JSON.stringify(runtime.status()))
+    }
+    // Read-only browsing, graph display and task receipts remain available.
+    // Search uses a model, and writes may schedule native work: gate these
+    // before acceptance so standby never cancels a partially written request.
+    if (background && ['POST', 'PATCH', 'DELETE'].includes(req.method)
+        && !['/v2/ingests/lookup', '/v1/grep'].includes(route)) {
+      try { return await background.run(() => app(req, res)) }
+      catch (err) {
+        res.writeHead(err.status || 503, { 'content-type': 'application/json' })
+        return res.end(JSON.stringify({ error: { code: err.code || 'background_unavailable', message: err.message } }))
+      }
     }
     return app(req, res)
   }
@@ -77,13 +107,15 @@ async function start(config, { runtimeOptions } = {}) {
       await listen(httpServer, config.httpPort, config.httpHost)
     }
   } catch (err) {
+    await background?.stop()
     await app.close?.()
     socketServer.close()
     if (httpServer) httpServer.close()
     if (runtime) await runtime.stop()
     throw err
   }
-  app.resume?.() // Resume only after this process successfully owns its sockets.
+  app.resume?.() // Resume receipt monitoring only after this process owns its sockets.
+  if (background?.paused) background.reconcile()
   console.log(`[violoop-mem] OpenViking adapter listening: ${config.socket}`)
   console.log(`[violoop-mem] backend=openviking; adapter state=${config.dataDir}`)
   let shutdownPromise
@@ -91,7 +123,7 @@ async function start(config, { runtimeOptions } = {}) {
     if (shutdownPromise) return shutdownPromise
     process.removeListener('SIGTERM', shutdown)
     process.removeListener('SIGINT', shutdown)
-    const closingApp = app.close?.()
+    const closingApp = (async () => { await background?.stop(); await app.close?.() })()
     socketServer.close()
     if (httpServer) httpServer.close()
     // Keep-alive clients must not keep a systemd stop pending indefinitely.
@@ -100,12 +132,12 @@ async function start(config, { runtimeOptions } = {}) {
       if (httpServer) httpServer.closeAllConnections()
     }, 2000)
     timer.unref()
-    shutdownPromise = Promise.all([closingApp, runtime ? runtime.stop() : Promise.resolve()])
+    shutdownPromise = closingApp.then(() => runtime?.stop())
     return shutdownPromise
   }
   process.once('SIGTERM', shutdown)
   process.once('SIGINT', shutdown)
-  return { client, socketServer, httpServer, runtime, shutdown }
+  return { client, socketServer, httpServer, runtime, background, shutdown }
 }
 
 if (require.main === module) start(loadConfig()).catch(err => {

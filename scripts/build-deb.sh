@@ -32,7 +32,7 @@ if [[ "$(uname -s)" != "Linux" ]]; then
   exit 1
 fi
 
-for bin in node npm nfpm; do
+for bin in node npm nfpm dpkg-deb; do
   command -v "$bin" >/dev/null 2>&1 || { echo "Error: '$bin' not found on PATH." >&2; exit 1; }
 done
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
@@ -101,5 +101,7 @@ python3 scripts/build-openviking-runtime.py --replace
 mkdir -p dist
 echo ">> nfpm package"
 VERSION="$VERSION" nfpm package --config scripts/nfpm.yaml --packager deb --target "$OUT_DEB"
+echo ">> smoke test: extracted package runtime"
+bash "$SCRIPT_DIR/check-deb.sh" "$OUT_DEB"
 echo ">> done: $OUT_DEB"
 ls -lh "$OUT_DEB"

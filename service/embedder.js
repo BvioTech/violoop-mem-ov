@@ -138,6 +138,11 @@ class Embedder {
     this.modelPath = null
     this._ctx = null
     this._loading = null
+    this._model = null
+    this._suspended = false
+    this._suspending = null
+    this._active = 0
+    this._onIdle = null
   }
 
   resolveModelPath() {
@@ -152,6 +157,7 @@ class Embedder {
 
   /** Lazy, single-flight load. Never throws — flips state instead. */
   async ensureLoaded() {
+    if (this._suspended) return false
     if (!this.enabled || this.state === 'unavailable') return this.state === 'ready'
     if (this.state === 'ready') return true
     if (this._loading) { await this._loading; return this.state === 'ready' }
@@ -183,6 +189,7 @@ class Embedder {
       const { getLlama, LlamaLogLevel } = await import('node-llama-cpp')
       const llama = await getLlama({ logLevel: LlamaLogLevel.error })
       const model = await llama.loadModel({ modelPath })
+      this._model = model
       this._ctx = await model.createEmbeddingContext()
       const probe = await this._ctx.getEmbeddingFor(this.profile.doc('none', 'probe'))
       this.dim = probe.vector.length
@@ -192,6 +199,7 @@ class Embedder {
       console.log(`[embedder] ready: ${path.basename(modelPath)} (dim ${this.dim}, profile ${this.profile.id})`)
     } catch (err) {
       console.warn('[embedder] load failed; lexical-only search:', err?.message || err)
+      await this._dispose()
       this.state = 'unavailable'
     }
   }
@@ -209,16 +217,41 @@ class Embedder {
   }
 
   async _embed(formatted, retried = false) {
+    if (this._suspended) return null
+    this._active++
     try {
       const e = await this._ctx.getEmbeddingFor(formatted)
       return new Float32Array(e.vector)
     } catch (err) {
       // getEmbeddingFor fails intermittently under sustained sequential
       // load; one retry recovers it (observed during calibration probing).
-      if (!retried) return this._embed(formatted, true)
+      if (!retried && !this._suspended) return await this._embed(formatted, true)
       console.warn('[embedder] embed failed:', err?.message || err)
       return null
+    } finally {
+      this._active--
+      if (!this._active) { this._onIdle?.(); this._onIdle = null }
     }
+  }
+
+  async _dispose() {
+    const ctx = this._ctx, model = this._model
+    this._ctx = null; this._model = null
+    try { await ctx?.dispose() } finally { await model?.dispose() }
+  }
+  async resume() {
+    await this._suspending
+    this._suspended = false
+  }
+  suspend() {
+    this._suspended = true
+    if (!this._suspending) this._suspending = (async () => {
+      await this._loading
+      if (this._active) await new Promise(resolve => { this._onIdle = resolve })
+      await this._dispose()
+      if (this.state === 'ready') this.state = 'idle'
+    })().finally(() => { this._suspending = null })
+    return this._suspending
   }
 
   status() {

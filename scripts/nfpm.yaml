@@ -96,6 +96,8 @@ contents:
   - src: ./build/openviking-python
     dst: /opt/violoop-mem/openviking-python
     type: tree
+  - src: ./service/background.js
+    dst: /opt/violoop-mem/background.js
   - src: ./service/embedder.js
     dst: /opt/violoop-mem/embedder.js
   - src: ./service/config.js

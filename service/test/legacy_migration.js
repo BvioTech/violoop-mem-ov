@@ -86,15 +86,16 @@ test('journal lookup is read-only, durable terminal receipts survive missing ups
   assert.equal((await j.lookup(body)).status, 'completed'); assert.equal(reads, 1)
 })
 
-test('journal uncertain writes cannot be replayed; pre-write state is retryable', async t => {
+test('unconfirmed journal writes report failed without replaying the same attempt; pre-write state is retryable', async t => {
   const dir = root(t)
   const client = { scope: 'scope', addMessages: async () => { throw new Error('lost response') } }
   const j = new IngestJournal(client, dir)
   const body = { episode: { messages: [{ role: 'user', content: 'fact' }] } }
   await assert.rejects(j.ingest(body), /lost response/)
   const receipt = await j.lookup(body)
-  assert.equal(receipt.status, 'uncertain')
-  await assert.rejects(j.ingest(body), /prior upstream write/)
+  assert.equal(receipt.status, 'failed')
+  assert.match(receipt.error, /lost response/)
+  await assert.rejects(j.ingest(body), e => e.code === 'ingest_failed')
   const file = path.join(j.dir, receipt.ingestId + '.json')
   const record = JSON.parse(fs.readFileSync(file)); record.phase = 'new'; writeJson(file, record)
   assert.equal((await j.lookup(body)).status, 'retryable')
@@ -139,7 +140,7 @@ test('manual-only start, accepted is pending, restart resumes exactly one submis
 test('corruption and scope changes fail closed without resubmission', async t => {
   const dir = root(t), sourceFile = sourceDb(dir)
   const client = { scope: 'scope', ready: async () => true, migrationReady: async () => true }
-  const journal = { lookup: async () => ({ status: 'uncertain' }) }
+  const journal = { lookup: async () => ({ status: 'failed' }) }
   const svc = new LegacyMigration({ dataDir: dir, sourceFile, client, journal })
   await svc.start(); svc.stop()
   const s = JSON.parse(fs.readFileSync(svc.file))
@@ -166,67 +167,7 @@ function seededMigration(dir, middleStatus = 'pending') {
   return batches
 }
 
-test('uncertain batches stay skipped after restart and manual start', async t => {
-  for (const status of ['uncertain']) {
-    const dir = root(t), batches = seededMigration(dir), visited = []
-    const reason = status === 'failed' ? 'model rejected content' : 'commit response lost'
-    const journal = {
-      lookup: async body => {
-        const index = batches.findIndex(b => body.episode.sessionId === 'legacy-' + b.id)
-        visited.push(index)
-        return { status: index === 1 ? status : 'completed', taskId: 'task-' + index,
-          ingestId: 'ingest-' + index, ...(index === 1 ? { task: { error: reason } } : {}) }
-      },
-      ingest: async () => assert.fail('must not replay any batch'),
-    }
-    const options = { dataDir: dir, client: { scope: 'scope', ready: async () => true, migrationReady: async () => true },
-      journal, pollMs: 5, autoResume: false }
-    let svc = new LegacyMigration(options)
-    await svc.run()
-    assert.deepEqual(visited, [0, 1, 2])
-    assert.deepEqual(svc.state.batches.map(b => b.status), ['completed', status, 'completed'])
-    assert.equal(svc.status().running, false)
-    assert.equal(svc.status().pendingCount, 1)
-    assert.match(svc.status().lastError.message, new RegExp(reason))
-    const issueFile = path.join(dir, 'legacy-migration/issues.json')
-    const issues = JSON.parse(fs.readFileSync(issueFile))
-    assert.equal(issues.batches.length, 1)
-    assert.deepEqual(issues.batches[0], { batch: 2, batchId: batches[1].id, status, error: reason,
-      recordedAt: svc.state.batches[1].issueRecordedAt, taskId: 'task-1', ingestId: 'ingest-1',
-      sourceTokens: batches[1].tokens, sourceGroups: ['memory:problem'], attempt: 0, trigger: 'primary' })
-    assert.equal(fs.statSync(issueFile).mode & 0o777, 0o600)
-    svc.stop()
-    svc = new LegacyMigration(options)
-    t.after(() => svc.stop())
-    await svc.start(); await waitFor(() => !svc.state.started)
-    assert.deepEqual(visited, [0, 1, 2])
-    assert.deepEqual(JSON.parse(fs.readFileSync(issueFile)), issues)
-    assert.equal(svc.status().pendingCount, 1)
-    assert.match(svc.status().lastError.message, new RegExp(reason))
-  }
-})
-
-test('old uncertain states are recorded before later batches proceed without replay', async t => {
-  for (const status of ['uncertain']) {
-    const dir = root(t), batches = seededMigration(dir, status), visited = []
-    const svc = new LegacyMigration({ dataDir: dir, autoResume: false,
-      client: { scope: 'scope', ready: async () => true, migrationReady: async () => true },
-      journal: { lookup: async body => {
-        const index = batches.findIndex(b => body.episode.sessionId === 'legacy-' + b.id)
-        visited.push(index)
-        assert.notEqual(index, 1)
-        const issues = JSON.parse(fs.readFileSync(path.join(dir, 'legacy-migration/issues.json')))
-        assert.equal(issues.batches[0].error, 'previous failure')
-        return { status: 'completed' }
-      }, ingest: async () => assert.fail('must not resubmit') } })
-    t.after(() => svc.stop())
-    await svc.run()
-    assert.deepEqual(visited, [0, 2])
-    assert.equal(svc.status().pendingCount, 1)
-  }
-})
-
-test('lost write response becomes uncertain and the next batch runs without replaying the write', async t => {
+test('lost write responses use three bounded retries and later manual starts add one attempt', async t => {
   const dir = root(t), batches = seededMigration(dir), writes = []
   const client = { scope: 'scope', ready: async () => true, migrationReady: async () => true,
     addMessages: async (_session, messages) => {
@@ -237,16 +178,23 @@ test('lost write response becomes uncertain and the next batch runs without repl
     },
     commit: async () => ({ task_id: 'task' }), task: async () => ({ status: 'completed' }) }
   const svc = new LegacyMigration({ dataDir: dir, client, journal: new IngestJournal(client, dir),
-    autoResume: false, pollMs: 5 })
+    autoResume: false, pollMs: 5, retryDelaysMs: [0, 0, 0] })
   t.after(() => svc.stop())
   await svc.run(); await waitFor(() => !svc.state.started)
-  assert.deepEqual(writes, [0, 1, 2])
-  assert.deepEqual(svc.state.batches.map(b => b.status), ['completed', 'uncertain', 'completed'])
+  assert.deepEqual(writes, [0, 1, 2, 1, 1, 1])
+  assert.deepEqual(svc.state.batches.map(b => b.status), ['completed', 'failed', 'completed'])
+  assert.equal(svc.status().automaticRetryCount, 3)
+  assert.equal(Object.hasOwn(svc.status(), 'uncertainBatches'), false)
   assert.equal(svc.status().pendingCount, 1)
   const issues = JSON.parse(fs.readFileSync(svc.issuesFile))
-  assert.equal(issues.batches[0].status, 'uncertain')
+  assert.equal(issues.batches[0].status, 'failed')
+  assert.equal(issues.history.length, 3)
   assert.match(issues.batches[0].error, /batch_started/)
   assert.match(issues.batches[0].error, /connection lost after write/)
+  assert.equal((await svc.start()).retriedBatches, 1)
+  await waitFor(() => !svc.state.started)
+  assert.deepEqual(writes, [0, 1, 2, 1, 1, 1, 1])
+  assert.equal(svc.status().automaticRetryCount, 3)
 })
 
 test('cancelled outcomes still pause without processing later batches', async t => {
@@ -560,4 +508,59 @@ test('upgrading a stopped old retry round never starts new automatic attempts', 
   assert.equal((await resumed.start()).retriedBatches, 1)
   await waitFor(() => !resumed.state.started)
   assert.equal(f.commits.length, 1, 'manual click adds exactly one attempt')
+})
+
+test('missing native task results share the failure retry budget and manual retries never open another automatic round', async t => {
+  const f = retryFixture(t, task => {
+    if (task.name !== 'problem') return 'completed'
+    if (task.attempt % 2) throw Object.assign(new Error('missing task'), { upstreamStatus: 404 })
+    return 'failed'
+  })
+  f.client.read = async () => { throw Object.assign(new Error('missing archive marker'), { upstreamStatus: 404 }) }
+  await f.svc.run(); await waitFor(() => !f.svc.state.started)
+  assert.equal(f.counts.get('problem'), 4)
+  assert.equal(f.svc.status().automaticRetryCount, 3)
+  assert.equal(f.svc.state.batches[1].status, 'failed')
+  assert.match(f.svc.state.batches[1].error, /Native task missing/)
+  await f.svc.start(); await waitFor(() => !f.svc.state.started)
+  assert.equal(f.counts.get('problem'), 5)
+  await new Promise(resolve => setTimeout(resolve, 25))
+  assert.equal(f.counts.get('problem'), 5)
+  assert.equal(f.counts.get('first'), 1); assert.equal(f.counts.get('last'), 1)
+})
+
+test('missing task with no archive is a durable failure and duplicate status checks do not resubmit', async t => {
+  const dir = root(t); let writes = 0, commits = 0, polls = 0
+  const client = { scope: 'scope', addMessages: async () => writes++, commit: async () => {
+    commits++; return { task_id: 'missing', archive_uri: 'viking://sessions/history/archive_001' }
+  }, task: async () => { polls++; throw Object.assign(new Error('missing'), { upstreamStatus: 404 }) },
+  read: async () => { throw Object.assign(new Error('missing'), { upstreamStatus: 404 }) } }
+  const body = { episode: { sessionId: 'daily', messages: [{ role: 'user', content: 'fact' }] } }
+  const journal = new IngestJournal(client, dir)
+  await journal.ingest(body)
+  assert.equal((await journal.lookup(body)).status, 'failed')
+  assert.equal((await new IngestJournal(client, dir).lookup(body)).status, 'failed')
+  assert.equal(writes, 1); assert.equal(commits, 1); assert.equal(polls, 1)
+})
+
+test('lost commit responses retry in fresh sessions and can succeed without rewriting completed batches', async t => {
+  const f = retryFixture(t, () => 'completed')
+  const commit = f.client.commit
+  f.client.commit = async session => {
+    const result = await commit(session)
+    const task = f.commits.at(-1)
+    if (task.name === 'problem' && task.attempt === 0) throw new Error('connection lost after task creation')
+    return result
+  }
+  await f.svc.run(); await waitFor(() => !f.svc.state.started)
+  assert.equal(f.svc.status().pendingCount, 0)
+  assert.equal(f.counts.get('problem'), 2)
+  assert.equal(f.counts.get('first'), 1); assert.equal(f.counts.get('last'), 1)
+  const previous = f.svc.state.batches[1].attempts[0]
+  assert.equal(previous.status, 'failed')
+  assert.match(previous.error, /commit_started/)
+  assert.match(previous.error, /connection lost after task creation/)
+  const attempts = f.commits.filter(task => task.name === 'problem')
+  assert.notEqual(attempts[0].session, attempts[1].session)
+  assert.deepEqual(attempts[0].messages, attempts[1].messages)
 })

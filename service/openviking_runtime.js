@@ -52,6 +52,7 @@ function nativeConfig(config, gatewayUrl, token, engineKey) {
   }
 }
 async function startRuntime(config, { spawnProcess = spawn, embedder = new Embedder(config.embedding) } = {}) {
+  await embedder.resume?.()
   const options = config.openviking
   if (!Number.isInteger(options.llmMaxTokens) || options.llmMaxTokens < 1 || options.llmMaxTokens > 65536) {
     throw new Error('OPENVIKING_LLM_MAX_TOKENS must be an integer from 1 to 65536')
@@ -123,6 +124,16 @@ async function startRuntime(config, { spawnProcess = spawn, embedder = new Embed
   if (embedder.ensureLoaded) void embedder.ensureLoaded()
   return {
     engineKey, embedder,
+    async suspend() {
+      gateway.setPaused(true)
+      await gateway.drain()
+      await embedder.suspend?.()
+    },
+    async resume() {
+      await embedder.resume?.()
+      if (embedder.ensureLoaded && !await embedder.ensureLoaded()) throw new Error('BGE embedding unavailable on resume')
+      gateway.setPaused(false)
+    },
     async modelReady() {
       try {
         const url = new URL(options.deviceModelUrl)
@@ -150,6 +161,7 @@ async function startRuntime(config, { spawnProcess = spawn, embedder = new Embed
       }
       gateway.server.closeAllConnections()
       await new Promise(resolve => gateway.server.close(resolve))
+      await embedder.suspend?.()
     },
   }
 }

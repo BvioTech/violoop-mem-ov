@@ -171,37 +171,43 @@ class IngestJournal {
     let record = this.read(id)
     if (record?.result) { if (!record.terminal) this.watch(id); return { ...record.result, duplicate: true } }
     if (record && ['batch_started', 'commit_started'].includes(record.phase)) {
-      throw fail('ingest_uncertain', `prior upstream write may have succeeded; inspect native session ${record.sessionId} before retrying ingest ${id}`, 409)
+      throw fail('ingest_failed', `Upstream submission result was not confirmed (${record.phase}); retry with a new attempt identity for ingest ${id}`, 409)
     }
     const migration = messages.length && messages.every(m => m.source_message_ids?.length
       && m.source_message_ids.every(id => id.startsWith('violoop-legacy-migration:')))
     record ||= { id, sessionId: (migration ? 'vm-legacy-' : 'vm-') + id, sourceSessionId: body.episode.sessionId || null, createdAt: new Date().toISOString(), phase: 'new', messagesWritten: 0 }
-    // Native batch API has a hard cap of 100 messages.
-    // Persist before every write; a timeout must never blindly replay a batch.
-    while ((record.messagesWritten || 0) < messages.length) {
-      const offset = record.messagesWritten || 0
-      const batch = messages.slice(offset, offset + 100)
-      record.phase = 'batch_started'
+    try {
+      // Native batch API has a hard cap of 100 messages.
+      // Persist before every write; a timeout must never blindly replay a batch.
+      while ((record.messagesWritten || 0) < messages.length) {
+        const offset = record.messagesWritten || 0
+        const batch = messages.slice(offset, offset + 100)
+        record.phase = 'batch_started'
+        this.save(record)
+        await this.client.addMessages(record.sessionId, batch)
+        record.messagesWritten = offset + batch.length
+        record.phase = 'messages_written'
+        this.save(record)
+      }
+      record.phase = 'commit_started'
       this.save(record)
-      await this.client.addMessages(record.sessionId, batch)
-      record.messagesWritten = offset + batch.length
-      record.phase = 'messages_written'
+      const commit = await this.client.commit(record.sessionId)
+      if (!commit || typeof commit.task_id !== 'string') throw fail('upstream_error', 'OpenViking commit did not return a task_id; inspect native session before retry', 502)
+      record.phase = 'accepted'
+      record.result = {
+        backend: 'openviking', status: 'accepted', ingestId: id,
+        sessionId: record.sessionId, taskId: commit.task_id, archiveUri: commit.archive_uri || null,
+        episode: { id, sessionId: body.episode.sessionId || record.sessionId },
+        entities: [], relations: [],
+      }
       this.save(record)
+      this.watch(id)
+      return record.result
+    } catch (err) {
+      record.error = err.message
+      this.save(record)
+      throw err
     }
-    record.phase = 'commit_started'
-    this.save(record)
-    const commit = await this.client.commit(record.sessionId)
-    if (!commit || typeof commit.task_id !== 'string') throw fail('upstream_error', 'OpenViking commit did not return a task_id; inspect native session before retry', 502)
-    record.phase = 'accepted'
-    record.result = {
-      backend: 'openviking', status: 'accepted', ingestId: id,
-      sessionId: record.sessionId, taskId: commit.task_id, archiveUri: commit.archive_uri || null,
-      episode: { id, sessionId: body.episode.sessionId || record.sessionId },
-      entities: [], relations: [],
-    }
-    this.save(record)
-    this.watch(id)
-    return record.result
   }
   watch(id) {
     this.watching.add(id)
@@ -259,9 +265,12 @@ class IngestJournal {
   async status(id) {
     const record = this.read(id)
     if (!record) throw fail('not_found', 'ingest not found', 404)
-    if (!record.result) return { ingestId: id, sessionId: record.sessionId,
-      status: ['batch_started', 'commit_started'].includes(record.phase) ? 'uncertain' : 'retryable',
-      phase: record.phase, messagesWritten: record.messagesWritten || 0 }
+    if (!record.result) {
+      const failed = ['batch_started', 'commit_started'].includes(record.phase)
+      return { ingestId: id, sessionId: record.sessionId, status: failed ? 'failed' : 'retryable',
+        phase: record.phase, messagesWritten: record.messagesWritten || 0,
+        ...(failed ? { error: `Upstream submission result was not confirmed (${record.phase})${record.error ? '; ' + record.error : ''}` } : {}) }
+    }
     if (record.terminal) {
       if (await this.finish(record)) this.watching.delete(id)
       return { ...record.result, ...record.terminal }
@@ -269,7 +278,7 @@ class IngestJournal {
     let task
     try { task = await this.client.task(record.result.taskId) } catch (e) {
       if (e.upstreamStatus !== 404) throw e
-      task = { status: 'uncertain', error: 'Native task missing and no terminal archive marker found' }
+      task = { status: 'failed', error: 'Native task missing and no terminal archive marker found' }
       if (record.result.archiveUri) for (const [file, state, field] of [
         ['.done', 'completed', 'ending_message_id'], ['.failed.json', 'failed', 'error'],
       ]) {
@@ -590,6 +599,13 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
       if (req.method === 'GET' && err.upstreamStatus === 404) return json(res, 404, { error: { code: 'not_found', message: 'Memory URI not found' } })
       if (!err.status) console.error('[violoop-mem] adapter error:', err.message)
       return json(res, err.status || 500, { error: { code: err.code || 'internal', message: err.status ? err.message : 'internal error' } })
+    }
+  }
+  app.setPaused = paused => migration.setPaused(paused)
+  app.drainSubmissions = async () => {
+    while (journal.pending.size || migration.starting || migration.running) {
+      await Promise.allSettled([...journal.pending.values()])
+      if (migration.starting || migration.running) await new Promise(resolve => setTimeout(resolve, 25))
     }
   }
   app.close = async () => { await migration.stop(); await journal.stop(); await consolidation.stop(); await graph.close() }

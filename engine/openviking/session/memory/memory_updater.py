@@ -220,6 +220,7 @@ class ExtractContext:
         *,
         split_long_text_messages: bool = True,
     ):
+        self.original_messages = list(messages or [])
         if chunk_meta is None:
             if split_long_text_messages:
                 self.messages, self.chunk_meta = self._build_extraction_messages(messages)

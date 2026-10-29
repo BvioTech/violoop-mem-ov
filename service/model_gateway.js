@@ -29,9 +29,16 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
   if (device.protocol !== 'http:' || device.hostname !== '127.0.0.1' || device.username || device.password) {
     throw new Error('device model URL must use HTTP on 127.0.0.1 without credentials')
   }
+  let paused = false
+  let active = 0
   const queues = { local: { tail: Promise.resolve(), queued: 0 }, remote: { tail: Promise.resolve(), queued: 0 } }
   const server = http.createServer(async (req, res) => {
     if (!authorized(req, token)) return json(res, 403, { error: { message: 'forbidden' } })
+    if (paused) return json(res, 503, { error: { message: 'Memory background is paused' } })
+    active++
+    let finished = false
+    const done = () => { if (!finished) { finished = true; active-- } }
+    res.once('finish', done); res.once('close', done)
     try {
       if (req.method !== 'POST') return json(res, 404, { error: { message: 'not found' } })
       const body = await readBody(req)
@@ -122,6 +129,8 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
     server.once('error', reject)
     server.listen(port, '127.0.0.1', () => { server.removeListener('error', reject); resolve() })
   })
-  return { server, url: `http://127.0.0.1:${server.address().port}/v1` }
+  return { server, setPaused(value) { paused = value }, async drain() {
+    while (active || queues.local.queued || queues.remote.queued) await new Promise(resolve => setTimeout(resolve, 10))
+  }, url: `http://127.0.0.1:${server.address().port}/v1` }
 }
 module.exports = { startModelGateway, authorized, readBody }

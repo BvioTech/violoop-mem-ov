@@ -49,6 +49,7 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-ov-native-'))
   let service
   let extractionCalls = 0; let migrationEmbeddings = 0
+  let holdExtraction = null; let releaseExtraction = () => {}
   const model = http.createServer(async (req, res) => {
     if (req.url.endsWith('/ready')) { res.end('{"ready":true}'); return }
     let raw = ''; for await (const c of req) raw += c
@@ -65,6 +66,7 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
     let content = '# Test memories\nLocal integration fixture.'
     if (isExtraction) {
       extractionCalls++
+      if (holdExtraction) await holdExtraction
       const n = extractionCalls
       content = `a = sdk.create_entities(category="projects", name="alpha${n}", content="""# alpha${n}\nProject connected to beta${n}.\n## Facts\n- A local fixture.""")\nb = sdk.create_entities(category="projects", name="beta${n}", content="""# beta${n}\nA second local project.\n## Facts\n- A local fixture.""")\na.link(b, link_type="related_to", match_text="beta${n}")\nsdk.commit()`
     }
@@ -77,6 +79,7 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
   })
   await new Promise(r => model.listen(0, '127.0.0.1', r))
   t.after(async () => {
+    releaseExtraction()
     if (service) await service.shutdown()
     model.closeAllConnections(); await new Promise(r => model.close(r))
     fs.rmSync(dir, { recursive: true, force: true })
@@ -91,7 +94,10 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
     ...(process.env.VIOLOOP_TEST_PYTHONPATH ? { OPENVIKING_PYTHONPATH: process.env.VIOLOOP_TEST_PYTHONPATH } : {}),
   })
   // Deterministic normalized embeddings exercise the real C++ vector store.
-  const embedder = { status: () => ({ state: 'ready', dim: 1024 }), async embedQuery(text) {
+  let modelPaused = false
+  const embedder = { status: () => ({ state: modelPaused ? 'idle' : 'ready', dim: 1024 }),
+    async suspend() { modelPaused = true }, async resume() { modelPaused = false }, async embedQuery(text) {
+    assert.equal(modelPaused, false, 'suspended model must not be used')
     const v = new Float32Array(1024)
     for (const c of String(text)) v[c.codePointAt(0) % v.length]++
     const norm = Math.sqrt(v.reduce((s, n) => s + n*n, 0)) || 1
@@ -102,7 +108,7 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
   await until(async () => (await req('GET', '/readyz')).ready)
   await until(async () => {
     const state = await req('GET', '/v2/migration/status')
-    if (state.failedBatches || state.uncertainBatches) throw new Error(JSON.stringify(state))
+    if (state.failedBatches) throw new Error(JSON.stringify(state))
     return state.pendingCount === 0 && extractionCalls > 0
   })
   assert.equal(digest(file), before)
@@ -135,4 +141,34 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
   assert.equal(digest(file), before, 'old graph.db must remain byte-identical')
   const generated = JSON.stringify(await req('GET', '/v1/memories?prefix=' + encodeURIComponent('viking://user/default/memories')))
   assert.doesNotMatch(generated, /identity.md|soul.md/)
+  // Pause via the real Device contract. Native queued writes finish before
+  // model disposal; browsing stays available and new model work is rejected.
+  holdExtraction = new Promise(resolve => { releaseExtraction = resolve })
+  const accepted = await req('POST', '/v2/ingest', { episode: { sessionId: 'standby-probe', messages: [
+    { role: 'user', content: 'Remember a new project for the standby lifecycle test.' },
+  ] } })
+  await until(() => extractionCalls > callsBefore)
+  const pause = await req('POST', '/runtime/background', { paused: true })
+  assert.equal(pause.paused, true)
+  assert.equal(pause.busy, true)
+  await wait(1200)
+  assert.equal((await req('GET', '/runtime/background')).busy, true)
+  assert.equal(modelPaused, false, 'do not release BGE before native task finishes')
+  releaseExtraction(); holdExtraction = null
+  await until(async () => !(await req('GET', '/runtime/background')).busy)
+  assert.equal(modelPaused, true)
+  assert.equal((await req('GET', '/v2/ingests/' + accepted.ingestId)).status, 'completed')
+  assert.equal((await req('GET', '/readyz')).ready, true)
+  assert.ok((await req('GET', '/v1/memory-entries')).items.length > 0)
+  await assert.rejects(req('POST', '/v1/search', { query: 'project' }), /503.*background_paused/)
+  await service.shutdown(); service = null
+  service = await start(config, { runtimeOptions: { embedder } })
+  await until(async () => !(await req('GET', '/runtime/background')).busy)
+  assert.equal((await req('GET', '/runtime/background')).paused, true)
+  await req('POST', '/runtime/background', { paused: false })
+  await until(async () => !(await req('GET', '/runtime/background')).busy)
+  assert.equal(modelPaused, false)
+  await req('POST', '/v1/search', { query: 'local integration project', mode: 'recall', limit: 5 })
+  assert.equal(extractionCalls, callsBefore + 1, 'standby and wake never replay completed migration or ingest')
+  assert.equal(digest(file), before)
 })

@@ -75,6 +75,10 @@ class OpenVikingClient {
     })
   }
 
+  waitProcessed() {
+    return this.request('POST', '/api/v1/system/wait', { timeout: 1 }, { timeoutMs: 3000 })
+  }
+
   stat(uri) { return this.request('GET', '/api/v1/fs/stat?' + new URLSearchParams({ uri })) }
   attrs(uri) { return this.request('GET', '/api/v1/fs/attrs?' + new URLSearchParams({ uri })) }
   writeMemory(uri, content, { mode, tags } = {}) {

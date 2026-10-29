@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 from openviking.session.memory.dataclass import MemoryFile
 from openviking.session.memory.utils.content_template import render_content_template
 from openviking.session.memory.utils.link_renderer import LinkRenderer
+from openviking.session.memory.utils.migration_sources import render_migration_sources
 from openviking.session.memory.utils.messages import parse_memory_file_with_fields
 from openviking.session.memory.utils.uri import render_template
 from openviking.utils.time_utils import parse_iso_datetime
@@ -81,7 +82,21 @@ def _serialize_with_metadata(
 ) -> str:
     content = metadata.pop("content", "") or ""
 
-    if content_template and account_content_template_type:
+    migration_source = metadata.get("migration_source")
+    if (content_template
+            and (metadata.get("memory_type") == "events" or "/memories/events/" in (source_uri or ""))
+            and isinstance(migration_source, dict)
+            and migration_source.get("version") == 1
+            and migration_source.get("archive_uri")
+            and migration_source.get("message_ids")):
+        # Keep the model's Summary exactly as generated. Replace only the raw
+        # ChatLog with a readable, programmatically formatted source section.
+        source_content = render_migration_sources(
+            extract_context.original_messages, migration_source["message_ids"]
+        )
+        content = ("# Summary\n" + str(metadata.get("summary") or "")
+                   + "\n\n# 迁移来源\n" + source_content)
+    elif content_template and account_content_template_type:
         # Managed-template failures must not be swallowed by the legacy plain
         # content fallback: that could silently overwrite a valid Markdown body.
         content = render_content_template(
