@@ -54,7 +54,17 @@ bash scripts/check-deb.sh dist/violoop-mem_<version>_arm64.deb
 
 单元/契约测试覆盖迁移、失败重试、提交结果未确认按失败处理、任务恢复、图谱增量更新、记忆 CRUD、检索与模型网关。原生集成测试启动真实 Python/C++/Rust 引擎，使用确定性模型替身；它验证工程链路，不评估模型质量。所有测试数据都在临时目录，测试结束清理，不访问当前模拟器数据。
 
-构建生成 OpenViking wheel 与完整服务源码归档。设备 `.deb` 必须在 Debian 12 ARM64 + Node 24 + Python 3.11 环境执行 `npm run build:deb`；不在 Mac 上生成冒充 ARM64 Linux 的包。所有构建产物均忽略，无自动发布。
+构建生成 OpenViking wheel 与完整服务源码归档。设备 `.deb` 必须在 Debian 12 ARM64 + Node 24 + Python 3.11 环境执行 `npm run build:deb`；不在 Mac 上生成冒充 ARM64 Linux 的包。本地构建产物均忽略，构建脚本不执行发布。
+
+### CI 与 Release
+
+GitHub Actions 在 main 的 push/PR 和手动触发时运行服务回归、原生引擎测试、集成测试及 Debian 包解包测试，成功产物保留 7 天。原生构建使用 ARM64 runner 上的 Debian 12 容器、Node 24 和系统 Python 3.11，不下载替代 Python 运行时。
+
+向 `BvioTech/violoop-mem-ov` 推送 `v<package.json version>` tag 才发布 GitHub Release；其他触发只构建、不发布。所有 `.deb` 和逐包 `.sha256` 附件上传完成后才公开 Release，带 `-` 的版本标记为 prerelease。不会覆盖已有同名 Release；失败后留下的草稿需要先检查，不能直接重复发布同一版本。
+
+发布前，在本仓库 Actions Secrets 配置 `APT_WEBHOOK_SECRET`，与 APT 服务的 `WEBHOOK_SECRET` 一致。APT 服务白名单须将 `violoop-mem_*_arm64.deb` 的来源迁移到 `BvioTech/violoop-mem-ov`，并给服务端 GitHub token 新仓库读取权限后重新部署。如果模型包继续由旧 `BvioTech/violoop-mem` 发布，旧条目只保留 `violoop-mem-model_*_arm64.deb`，不要让两个来源发布同名服务包。
+
+Release 发布后，独立的 APT 通知任务使用真实仓库名和 tag 向现有 webhook 发送 HMAC-SHA256 签名通知；缺少密钥或响应不是 202 会使该任务失败，可在配置修正后仅重跑失败任务，无需覆盖 Release。202 只代表后台同步已入队，仍需检查 APT 索引确认版本可见。模型包独立发布，不随服务 CI 重打；APT 源须已有 `violoop-mem-model >= 1.0.0`。
 
 ## 旧记忆保护
 

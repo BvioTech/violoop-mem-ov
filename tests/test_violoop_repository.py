@@ -87,3 +87,108 @@ def test_retained_tests_do_not_import_retired_applications():
                 arg = node.args[0]
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     assert arg.value.split("/")[0] not in {".github", "Dockerfile", "docker-compose.yml"}, (path, node.lineno)
+
+
+def test_ci_build_uses_device_runtime_and_release_is_tag_only():
+    import yaml
+    workflow = yaml.safe_load((ROOT / '.github/workflows/build-release.yml').read_text())
+    assert workflow['on']['push'] == {'branches': ['main'], 'tags': ['v*']}
+    assert workflow['on']['pull_request']['branches'] == ['main']
+    assert workflow['permissions'] == {'contents': 'read'}
+    jobs = workflow['jobs']
+    assert jobs['build']['needs'] == 'service'
+    assert jobs['build']['runs-on'] == 'ubuntu-24.04-arm'
+    assert jobs['build']['container'] == 'node:24-bookworm'
+    assert jobs['build']['env']['UV_PYTHON_DOWNLOADS'] == 'never'
+    assert jobs['build']['env']['OV_REQUIRE_RAGFS_BUILD'] == '1'
+    commands = [step.get('run') for step in jobs['build']['steps']]
+    assert 'npm run setup -- --python /usr/bin/python3 --bootstrap-rust' in commands
+    assert 'npm test' in commands
+    assert 'npm run test:integration' in commands
+    assert 'npm run build:deb' in commands
+    release = jobs['release']
+    assert release['needs'] == 'build'
+    assert release['permissions'] == {'contents': 'write'}
+    assert release['if'] == "github.repository == 'BvioTech/violoop-mem-ov' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')"
+    assert jobs['notify-apt']['needs'] == 'release'
+    assert jobs['notify-apt']['if'] == release['if']
+    assert jobs['notify-apt'].get('permissions', workflow['permissions']) == {'contents': 'read'}
+    upload = next(step for step in jobs['build']['steps'] if step.get('uses', '').startswith('actions/upload-artifact@'))
+    download = next(step for step in release['steps'] if step.get('uses', '').startswith('actions/download-artifact@'))
+    assert upload['with']['name'] == download['with']['name']
+    assert upload['with']['if-no-files-found'] == 'error'
+    publish = next(step for step in release['steps'] if 'gh release create' in step.get('run', ''))
+    assert '--verify-tag --draft' in publish['run']
+    assert 'dist/*.deb dist/*.deb.sha256' in publish['run']
+    assert '--prerelease="$PRERELEASE"' in publish['run']
+    assert publish['run'].index('gh release create') < publish['run'].index('--draft=false')
+    import ast
+    tree = ast.parse((ROOT / 'scripts/build.py').read_text())
+    loop = next(node for node in tree.body if isinstance(node, ast.For) and isinstance(node.target, ast.Name) and node.target.id == 'name')
+    files = set()
+    exec(compile(ast.Module(body=[loop], type_ignores=[]), 'source-file-selection', 'exec'), {'ROOT': ROOT, 'files': files})
+    assert '.github/workflows/build-release.yml' in files
+    assert 'tests/test_violoop_repository.py' in files
+
+
+def test_ci_version_check_rejects_wrong_tag_platform_arch_and_node():
+    import yaml
+    workflow = yaml.safe_load((ROOT / '.github/workflows/build-release.yml').read_text())
+    step = next(step for step in workflow['jobs']['build']['steps'] if step['name'] == 'Check device platform and release version')
+    code = step['run'].partition("node <<'JS'\n")[2].rpartition('\nJS')[0]
+    assert code
+    harness = r"""
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+const pkg = require('./package.json');
+const base = {
+  platform: 'linux', arch: 'arm64', versions: { node: '24.18.0' },
+  env: { NODE_VERSION: '24', GITHUB_EVENT_NAME: 'push', GITHUB_REF_TYPE: 'tag', GITHUB_REF_NAME: `v${pkg.version}` },
+};
+for (const [changes, shouldFail] of [
+  [{}, false],
+  [{ env: { ...base.env, GITHUB_REF_NAME: 'v0.0.0' } }, true],
+  [{ env: { ...base.env, GITHUB_EVENT_NAME: 'pull_request', GITHUB_REF_TYPE: 'branch', GITHUB_REF_NAME: 'feature' } }, false],
+  [{ platform: 'darwin' }, true],
+  [{ arch: 'x64' }, true],
+  [{ versions: { node: '22.0.0' } }, true],
+]) {
+  let failed = false;
+  try { vm.runInNewContext(CODE, { require: () => pkg, process: { ...base, ...changes } }); }
+  catch { failed = true; }
+  assert.equal(failed, shouldFail, JSON.stringify(changes));
+}
+"""
+    subprocess.run(['node', '-e', 'const CODE = ' + json.dumps(code) + ';\n' + harness], cwd=ROOT, check=True)
+
+
+def test_ci_apt_notification_signs_exact_body_and_fails_closed():
+    import os
+    import yaml
+    workflow = yaml.safe_load((ROOT / '.github/workflows/build-release.yml').read_text())
+    step = next(step for step in workflow['jobs']['notify-apt']['steps'] if step['name'] == 'Notify APT repository')
+    code = step['run'].partition("node <<'JS'\n")[2].rpartition('\nJS')[0]
+    assert code
+    mock = r"""
+const assert = require('node:assert/strict');
+global.fetch = async (url, options) => {
+  const body = JSON.stringify({ repo: process.env.GITHUB_REPOSITORY, tag: process.env.GITHUB_REF_NAME });
+  const expected = 'sha256=' + require('node:crypto').createHmac('sha256', process.env.APT_WEBHOOK_SECRET).update(body).digest('hex');
+  assert.equal(url, process.env.HOOK_URL);
+  assert.equal(options.method, 'POST');
+  assert.equal(options.body, body);
+  assert.equal(options.headers['Content-Type'], 'application/json');
+  assert.equal(options.headers['X-Hub-Signature-256'], expected);
+  assert.ok(options.signal instanceof AbortSignal);
+  return { status: Number(process.env.TEST_HTTP_STATUS), text: async () => 'fixture failure' };
+};
+"""
+    for secret, status, expected_exit in [('fixture-secret', '202', 0), ('fixture-secret', '401', 1), ('', '202', 1)]:
+        env = dict(os.environ, APT_WEBHOOK_SECRET=secret, TEST_HTTP_STATUS=status,
+                   HOOK_URL=step['env']['HOOK_URL'], GITHUB_REPOSITORY='BvioTech/violoop-mem-ov', GITHUB_REF_NAME='v0.11.5')
+        result = subprocess.run(['node', '-e', mock + '\n' + code], cwd=ROOT, env=env, capture_output=True, text=True)
+        assert result.returncode == expected_exit, result.stderr
+        if expected_exit == 0:
+            assert 'APT sync accepted' in result.stdout
+        else:
+            assert ('APT webhook returned 401' if secret else 'Configure the APT_WEBHOOK_SECRET') in result.stderr
