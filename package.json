@@ -1,6 +1,6 @@
 {
   "name": "violoop-mem-ov",
-  "version": "0.12.1",
+  "version": "0.0.0",
   "description": "VioLoop managed memory service with an in-repository OpenViking engine",
   "main": "service/server.js",
   "bin": {
