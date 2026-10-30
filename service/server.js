@@ -56,6 +56,15 @@ async function start(config, { runtimeOptions } = {}) {
   }
   const handler = async (req, res) => {
     const route = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '')
+    if (route === '/license') {
+      if (req.method !== 'GET') { res.writeHead(405, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { code: 'method_not_allowed', message: 'Method not allowed' } })) }
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({
+        license: 'AGPL-3.0',
+        notice: 'This service bundles OpenViking (AGPL-3.0, (c) ByteDance). The complete corresponding source for this software, including the exact version you are interacting with, is published at the project URL below as git tags and release source archives; match this installed package\'s version (see /opt/violoop-mem-ov/package.json or `dpkg -s violoop-mem-ov`) to the corresponding tag or release.',
+        project: 'https://github.com/BvioTech/violoop-mem-ov',
+      }))
+    }
     if (route === '/runtime/background') {
       try {
         if (!background) throw Object.assign(new Error('Background control requires managed OpenViking'), { status: 503 })
