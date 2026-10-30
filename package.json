@@ -2,6 +2,11 @@
   "name": "violoop-mem-ov",
   "version": "0.0.0",
   "description": "VioLoop managed memory service with an in-repository OpenViking engine",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BvioTech/violoop-mem-ov"
+  },
   "main": "service/server.js",
   "bin": {
     "violoop-mem-ov": "./service/server.js"

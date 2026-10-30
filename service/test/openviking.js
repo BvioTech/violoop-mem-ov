@@ -165,6 +165,14 @@ after(async () => {
   fs.rmSync(temp, { recursive: true, force: true })
 })
 
+test('license endpoint offers the AGPL-3.0 source location regardless of backend state', async () => {
+  const response = await request('GET', '/license')
+  assert.equal(response.status, 200)
+  assert.equal(response.body.license, 'AGPL-3.0')
+  assert.equal(response.body.project, 'https://github.com/BvioTech/violoop-mem-ov')
+  assert.equal((await request('POST', '/license')).status, 405)
+})
+
 test('device health reflects backend readiness; boot catalogues retain wire shapes', async () => {
   assert.equal((await request('GET', '/healthz')).body.backend, 'openviking')
   assert.equal((await request('GET', '/readyz')).body.ready, true)

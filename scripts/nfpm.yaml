@@ -110,6 +110,13 @@ contents:
     dst: /opt/violoop-mem-ov/package-lock.json
   - src: ./README.md
     dst: /opt/violoop-mem-ov/README.md
+  - src: ./LICENSE
+    dst: /opt/violoop-mem-ov/LICENSE
+  - src: ./NOTICE.md
+    dst: /opt/violoop-mem-ov/NOTICE.md
+  - src: ./engine/licenses
+    dst: /opt/violoop-mem-ov/engine-licenses
+    type: tree
   - src: ./deploy/openviking-adapter.yaml
     dst: /opt/violoop-mem-ov/openviking-adapter.yaml
   - src: ./deploy/ov.conf.example
