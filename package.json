@@ -23,7 +23,8 @@
     "build": "python3 scripts/build.py",
     "build:deb": "bash scripts/build-deb.sh",
     "test:live": "node scripts/openviking-live-smoke.js",
-    "test:package": ".venv/bin/python scripts/test-package.py"
+    "test:package": ".venv/bin/python scripts/test-package.py",
+    "push": "npm version patch && git push && git push --tags"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
