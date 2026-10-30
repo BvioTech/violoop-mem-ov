@@ -7,9 +7,9 @@ const fs = require('fs')
 const { randomUUID } = require('crypto')
 const { setTimeout: delay } = require('timers/promises')
 
-const socket = process.env.VIOLOOP_MEM_SOCKET || '/run/violoop-mem/violoop-mem.sock'
-const reportPath = process.env.VIOLOOP_MEM_SMOKE_REPORT
-const timeoutMs = Number(process.env.VIOLOOP_MEM_SMOKE_TIMEOUT_MS || 300000)
+const socket = process.env.VIOLOOP_MEM_OV_SOCKET || '/run/violoop-mem-ov/violoop-mem-ov.sock'
+const reportPath = process.env.VIOLOOP_MEM_OV_SMOKE_REPORT
+const timeoutMs = Number(process.env.VIOLOOP_MEM_OV_SMOKE_TIMEOUT_MS || 300000)
 const report = { startedAt: new Date().toISOString(), socket, steps: [] }
 
 async function request(method, route, body) {

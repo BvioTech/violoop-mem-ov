@@ -116,11 +116,11 @@ test('managed lifecycle confines engine and gateway to loopback and terminates c
   await runtime.stop(); assert.equal(runtime.status().pid, null)
 })
 test('native config preserves workspace ownership and bounded workers', () => {
-  const conf = nativeConfig({ dataDir: '/state', openviking: { url: 'http://127.0.0.1:1933', llmMaxTokens: 4096, runtimeDir: '/run/violoop-mem' } }, 'http://127.0.0.1:1/v1', 'token', 'engine')
+  const conf = nativeConfig({ dataDir: '/state', openviking: { url: 'http://127.0.0.1:1933', llmMaxTokens: 4096, runtimeDir: '/run/violoop-mem-ov' } }, 'http://127.0.0.1:1/v1', 'token', 'engine')
   assert.equal(conf.storage.workspace, '/state/openviking')
   assert.equal(conf.embedding.dense.dimension, 1024)
   assert.equal(conf.memory.link_enabled, true)
-  assert.equal(conf.memory.custom_templates_dir, '/run/violoop-mem/memory-templates')
+  assert.equal(conf.memory.custom_templates_dir, '/run/violoop-mem-ov/memory-templates')
   assert.equal(conf.queue_workers.session_commit.max_concurrent, 1)
 })
 

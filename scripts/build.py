@@ -16,8 +16,8 @@ run(PYTHON, '-m', 'build', '--wheel', '--no-isolation', '--outdir', dist, ENGINE
 package = json.loads((ROOT / 'package.json').read_text())
 version = package['version']
 # The source tree uses service/, while the installed service retains its public
-# /opt/violoop-mem/server.js entry point. Keep package metadata consistent, too.
-installed = {**package, 'main': 'server.js', 'bin': {'violoop-mem': './server.js'},
+# /opt/violoop-mem-ov/server.js entry point. Keep package metadata consistent, too.
+installed = {**package, 'main': 'server.js', 'bin': {'violoop-mem-ov': './server.js'},
              'scripts': {'start': 'node server.js'}}
 (ROOT / 'build').mkdir(exist_ok=True)
 (ROOT / 'build/package.json').write_text(json.dumps(installed, indent=2) + '\n')
@@ -34,9 +34,9 @@ for name in ('service', 'scripts', 'deploy', 'docs', 'tests', '.github'):
         if p.is_file() and not any(part in {'__pycache__', 'node_modules', '.venv', '.local', 'build', 'dist', 'target'} or part.endswith('.egg-info') for part in p.relative_to(ROOT).parts) and p.suffix in {'.py', '.js', '.cjs', '.sh', '.sql', '.md', '.json', '.yaml', '.yml'} and not p.name.startswith('.env'):
             files.add(str(p.relative_to(ROOT)))
 files.update(['.gitignore', '.dockerignore', 'package.json', 'package-lock.json', 'README.md', 'SOURCE_MANIFEST.json', 'NOTICE.md'])
-with tarfile.open(dist / f'violoop-mem-{version}-source.tar.gz', 'w:gz') as archive:
+with tarfile.open(dist / f'violoop-mem-ov-{version}-source.tar.gz', 'w:gz') as archive:
     for name in sorted(files):
-        archive.add(ROOT / name, arcname=f'violoop-mem/{name}', recursive=False)
+        archive.add(ROOT / name, arcname=f'violoop-mem-ov/{name}', recursive=False)
 print(f'Built source archive ({len(files)} files) and OpenViking {VERSION} wheel in {dist}')
 
 checksums = []

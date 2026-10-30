@@ -1,12 +1,12 @@
 /**
  * embedder.js — local GGUF embedding via node-llama-cpp。多模型 profile:
- * 现役 bge-m3(violoop-mem-model deb),遗留 embeddinggemma(violoop-qmd-model
+ * 现役 bge-m3(violoop-mem-ov-model deb),遗留 embeddinggemma(violoop-qmd-model
  * deb)自动兜底——提示词格式与标定常数按加载到的模型走(见 PROFILES)。
  *
  * Model resolution order (first hit wins):
  *   1. config embedding.model_path (absolute file)
  *   2. $QMD_MODELS_DIR/<candidate>(候选按 MODEL_CANDIDATES 优先级)
- *   3. /usr/local/share/violoop/mem/models/<candidate>(violoop-mem-model deb)
+ *   3. /usr/local/share/violoop/mem-ov/models/<candidate>(violoop-mem-ov-model deb)
  *   4. /usr/local/share/violoop/qmd/models/<candidate>(遗留 qmd-model deb)
  *
  * Unlike qmd there is NO automatic HuggingFace download fallback: on the
@@ -27,12 +27,12 @@ const path = require('path')
 const crypto = require('crypto')
 const { spawn } = require('child_process')
 
-// 候选模型按优先级排列:bge-m3(现役,violoop-mem-model deb 提供)优先,
+// 候选模型按优先级排列:bge-m3(现役,violoop-mem-ov-model deb 提供)优先,
 // embeddinggemma(遗留 violoop-qmd-model deb)兜底——过渡期老盒子没装新
-// 模型包时自动退回 gemma 继续工作。目录同理:mem/models 新家优先。
+// 模型包时自动退回 gemma 继续工作。目录同理:mem-ov/models 新家优先。
 const MODEL_CANDIDATES = ['bge-m3-q8_0.gguf', 'embeddinggemma-300M-Q8_0.gguf']
 const SYSTEM_MODELS_DIRS = [
-  '/usr/local/share/violoop/mem/models',
+  '/usr/local/share/violoop/mem-ov/models',
   '/usr/local/share/violoop/qmd/models',
 ]
 

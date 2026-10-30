@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-UNIT=violoop-mem.service
+UNIT=violoop-mem-ov.service
 
 case "$1" in
   configure)
@@ -9,12 +9,12 @@ case "$1" in
     # old violoop-qmd deb). Never overwrites operator edits.
     if [ ! -f /etc/qmd/qmd.yaml ]; then
       mkdir -p /etc/qmd
-      cp /opt/violoop-mem/qmd.yaml.default /etc/qmd/qmd.yaml
+      cp /opt/violoop-mem-ov/qmd.yaml.default /etc/qmd/qmd.yaml
       chmod 0644 /etc/qmd/qmd.yaml
     fi
-    if [ -d /var/lib/violoop-mem ]; then
+    if [ -d /var/lib/violoop-mem-ov ]; then
       # 0.8.0 起自有身份;从 0.7.x(qmd 属主)升级时顺带迁移属主
-      chown -R violoop-mem:violoop-mem /var/lib/violoop-mem || true
+      chown -R violoop-mem-ov:violoop-mem-ov /var/lib/violoop-mem-ov || true
     fi
 
     # 内存上限按机型分档。unit 里的 MemoryHigh=1792M / MemoryMax=2G 是按
@@ -34,7 +34,7 @@ case "$1" in
       if [ "$MEM_KB" -ge 6291456 ]; then
         # ≥6G:unit 里的默认值就是按这档定的,写个空覆盖把上一次装机可能
         # 留下的小内存档清掉(换板子/加内存的情况)。
-        printf '# 内存 %s kB(≥6G):用 unit 默认值,见 violoop-mem.service。\n[Service]\nMemoryHigh=1792M\nMemoryMax=2G\n' "$MEM_KB" > $MEM_DROPIN
+        printf '# 内存 %s kB(≥6G):用 unit 默认值,见 violoop-mem-ov.service。\n[Service]\nMemoryHigh=1792M\nMemoryMax=2G\n' "$MEM_KB" > $MEM_DROPIN
       else
         # <6G:软限取总内存的 35%(4G 板 ≈1.4G,正好在实测峰值附近开始节流),
         # 但不低于 1G —— 再低连模型都放不下,节流会变成持续颠簸。
@@ -96,7 +96,7 @@ case "$1" in
     if [ -d /run/systemd/system ]; then
       systemctl daemon-reload || true
       # 0.9.0 起共存策略:qmd 一概不碰(不 mask、不 stop、不删)。两服务
-      # 各有 socket(0.8.0 身份分离),edge 侧解析优先 violoop-mem。历史
+      # 各有 socket(0.8.0 身份分离),edge 侧解析优先 violoop-mem-ov。历史
       # 版本(≤0.8.0)mask 过 qmd.service 的盒子,这里顺手解除,让 qmd
       # 回到它自己 deb 管理的原生状态。
       systemctl unmask qmd.service >/dev/null 2>&1 || true
@@ -107,6 +107,6 @@ case "$1" in
       fi
     fi
     # 首启空库会自动从 /var/lib/qmd 的 markdown 存量导入(只读,原目录
-    # 不删不改);之后两边各自演进,edge 只写 violoop-mem。
+    # 不删不改);之后两边各自演进,edge 只写 violoop-mem-ov。
     ;;
 esac

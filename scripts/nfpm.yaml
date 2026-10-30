@@ -1,14 +1,14 @@
-# nfpm config — produces violoop-mem_<version>_arm64.deb.
+# nfpm config — produces violoop-mem-ov_<version>_arm64.deb.
 #
 # Invoked by scripts/build-deb.sh after `npm ci --omit=dev --include=optional`.
 # VERSION is injected from package.json via the env var.
 #
 # 部署形态承袭 violoop-qmd(nfpm deb + systemd)并整包接管它;0.8.0 起
-# 使用自有身份:violoop-mem 用户/组 + /run/violoop-mem/violoop-mem.sock
+# 使用自有身份:violoop-mem-ov 用户/组 + /run/violoop-mem-ov/violoop-mem-ov.sock
 # (旧 socket 路径留兼容 symlink 供在途 edge 过渡);配置仍读
 # /etc/qmd/qmd.yaml(操作员既有配置不迁)。
 
-name: violoop-mem
+name: violoop-mem-ov
 arch: arm64
 platform: linux
 version: ${VERSION}
@@ -37,11 +37,11 @@ depends:
   - python3 (>= 3.11)
   - python3 (<< 3.12)
   - libstdc++6
-  - violoop-mem-model (>= 1.0.0)
+  - violoop-mem-ov-model (>= 1.0.0)
 
 # 0.9.0 起与 violoop-qmd **并装共存**(不 conflicts、不 replaces):
 # 两服务各有用户与 socket(0.8.0 身份分离),qmd 原封不动,edge 侧
-# 解析优先 violoop-mem。装本包从此不触发任何移除——0.5.0 时代
+# 解析优先 violoop-mem-ov。装本包从此不触发任何移除——0.5.0 时代
 # conflicts+连坐卸 edge 的事故类别从结构上消灭。
 #
 # provides 保留:qmd 未安装的盒子(全新机)上,老 edge deb 的
@@ -52,84 +52,84 @@ provides:
 
 contents:
   - src: ./service/server.js
-    dst: /opt/violoop-mem/server.js
+    dst: /opt/violoop-mem-ov/server.js
   - src: ./service/openviking_adapter.js
-    dst: /opt/violoop-mem/openviking_adapter.js
+    dst: /opt/violoop-mem-ov/openviking_adapter.js
   - src: ./service/openviking_client.js
-    dst: /opt/violoop-mem/openviking_client.js
+    dst: /opt/violoop-mem-ov/openviking_client.js
   - src: ./service/openviking_entries.js
-    dst: /opt/violoop-mem/openviking_entries.js
+    dst: /opt/violoop-mem-ov/openviking_entries.js
   - src: ./service/openviking_manual.js
-    dst: /opt/violoop-mem/openviking_manual.js
+    dst: /opt/violoop-mem-ov/openviking_manual.js
   - src: ./service/openviking_consolidation.js
-    dst: /opt/violoop-mem/openviking_consolidation.js
+    dst: /opt/violoop-mem-ov/openviking_consolidation.js
   - src: ./service/openviking_graph.js
-    dst: /opt/violoop-mem/openviking_graph.js
+    dst: /opt/violoop-mem-ov/openviking_graph.js
   - src: ./service/openviking_uri.js
-    dst: /opt/violoop-mem/openviking_uri.js
+    dst: /opt/violoop-mem-ov/openviking_uri.js
   - src: ./service/openviking_agent.js
-    dst: /opt/violoop-mem/openviking_agent.js
+    dst: /opt/violoop-mem-ov/openviking_agent.js
   - src: ./service/event_time_decay.js
-    dst: /opt/violoop-mem/event_time_decay.js
+    dst: /opt/violoop-mem-ov/event_time_decay.js
   - src: ./service/hybrid_search.js
-    dst: /opt/violoop-mem/hybrid_search.js
+    dst: /opt/violoop-mem-ov/hybrid_search.js
   - src: ./service/retrieval_budget.js
-    dst: /opt/violoop-mem/retrieval_budget.js
+    dst: /opt/violoop-mem-ov/retrieval_budget.js
   - src: ./service/openviking_runtime.js
-    dst: /opt/violoop-mem/openviking_runtime.js
+    dst: /opt/violoop-mem-ov/openviking_runtime.js
   - src: ./service/model_gateway.js
-    dst: /opt/violoop-mem/model_gateway.js
+    dst: /opt/violoop-mem-ov/model_gateway.js
   - src: ./service/migration_timing.js
-    dst: /opt/violoop-mem/migration_timing.js
+    dst: /opt/violoop-mem-ov/migration_timing.js
   - src: ./service/migration_embedding.js
-    dst: /opt/violoop-mem/migration_embedding.js
+    dst: /opt/violoop-mem-ov/migration_embedding.js
   - src: ./scripts/migration-timing-report.py
-    dst: /opt/violoop-mem/scripts/migration-timing-report.py
+    dst: /opt/violoop-mem-ov/scripts/migration-timing-report.py
   - src: ./service/legacy_source.js
-    dst: /opt/violoop-mem/legacy_source.js
+    dst: /opt/violoop-mem-ov/legacy_source.js
   - src: ./service/legacy_migration_plan.js
-    dst: /opt/violoop-mem/legacy_migration_plan.js
+    dst: /opt/violoop-mem-ov/legacy_migration_plan.js
   - src: ./service/legacy_migration.js
-    dst: /opt/violoop-mem/legacy_migration.js
+    dst: /opt/violoop-mem-ov/legacy_migration.js
   - src: ./service/durable_json.js
-    dst: /opt/violoop-mem/durable_json.js
+    dst: /opt/violoop-mem-ov/durable_json.js
   - src: ./build/openviking-python
-    dst: /opt/violoop-mem/openviking-python
+    dst: /opt/violoop-mem-ov/openviking-python
     type: tree
   - src: ./service/background.js
-    dst: /opt/violoop-mem/background.js
+    dst: /opt/violoop-mem-ov/background.js
   - src: ./service/embedder.js
-    dst: /opt/violoop-mem/embedder.js
+    dst: /opt/violoop-mem-ov/embedder.js
   - src: ./service/config.js
-    dst: /opt/violoop-mem/config.js
+    dst: /opt/violoop-mem-ov/config.js
   - src: ./service/frontmatter.js
-    dst: /opt/violoop-mem/frontmatter.js
+    dst: /opt/violoop-mem-ov/frontmatter.js
   - src: ./build/package.json
-    dst: /opt/violoop-mem/package.json
+    dst: /opt/violoop-mem-ov/package.json
   - src: ./build/package-lock.json
-    dst: /opt/violoop-mem/package-lock.json
+    dst: /opt/violoop-mem-ov/package-lock.json
   - src: ./README.md
-    dst: /opt/violoop-mem/README.md
+    dst: /opt/violoop-mem-ov/README.md
   - src: ./deploy/openviking-adapter.yaml
-    dst: /opt/violoop-mem/openviking-adapter.yaml
+    dst: /opt/violoop-mem-ov/openviking-adapter.yaml
   - src: ./deploy/ov.conf.example
-    dst: /opt/violoop-mem/ov.conf.example
+    dst: /opt/violoop-mem-ov/ov.conf.example
   - src: ./scripts/openviking-live-smoke.js
-    dst: /opt/violoop-mem/scripts/openviking-live-smoke.js
+    dst: /opt/violoop-mem-ov/scripts/openviking-live-smoke.js
   - src: ./node_modules
-    dst: /opt/violoop-mem/node_modules
+    dst: /opt/violoop-mem-ov/node_modules
     type: tree
 
   # systemd unit + default config template. The default ships to /opt (NOT a
   # dpkg conffile); postinst seeds /etc/qmd/qmd.yaml from it only when the
   # file does not exist (fresh boxes without the old violoop-qmd deb), so
   # upgrades and takeovers never touch operator-edited config.
-  - src: ./deploy/violoop-mem.service
-    dst: /lib/systemd/system/violoop-mem.service
+  - src: ./deploy/violoop-mem-ov.service
+    dst: /lib/systemd/system/violoop-mem-ov.service
     file_info:
       mode: 0644
   - src: ./deploy/qmd.yaml.default
-    dst: /opt/violoop-mem/qmd.yaml.default
+    dst: /opt/violoop-mem-ov/qmd.yaml.default
     file_info:
       mode: 0644
 

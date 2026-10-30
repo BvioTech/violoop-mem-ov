@@ -28,9 +28,9 @@ with tempfile.TemporaryDirectory(prefix='runtime-stage-', dir=target.parent) as 
     shutil.copyfile(ENGINE / 'LICENSE', stage / 'OPENVIKING-LICENSE')
     shutil.copyfile(lock, stage / 'requirements-locked.txt')
     service_version = json.loads((ROOT / 'package.json').read_text())['version']
-    archive = ROOT / 'dist' / f'violoop-mem-{service_version}-source.tar.gz'
+    archive = ROOT / 'dist' / f'violoop-mem-ov-{service_version}-source.tar.gz'
     if not archive.is_file(): raise RuntimeError('Matching service source archive is missing; run npm run build.')
-    shutil.copyfile(archive, stage / 'violoop-mem-source.tar.gz')
+    shutil.copyfile(archive, stage / 'violoop-mem-ov-source.tar.gz')
     from common import environment
     env = environment(); env['PYTHONPATH'] = str(stage)
     subprocess.run([str(PYTHON), '-S', '-c', 'import sys; sys.path.insert(0, sys.argv[1]); import openviking.server.bootstrap; import openviking; print(openviking.__version__)', str(stage)], cwd=temp, env=env, check=True)

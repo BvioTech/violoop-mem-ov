@@ -1,9 +1,9 @@
 # node service/server.js --config deploy/openviking-adapter.yaml
 backend: openviking
-socket: /run/violoop-mem/violoop-mem.sock
+socket: /run/violoop-mem-ov/violoop-mem-ov.sock
 socket_mode: "0660"
 socket_group: violoop
-data_dir: /var/lib/violoop-mem-openviking-pilot
+data_dir: /var/lib/violoop-mem-ov-openviking-pilot
 
 openviking:
   mode: managed

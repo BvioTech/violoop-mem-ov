@@ -22,7 +22,7 @@ if [ "${VIOLOOP_DISPOSABLE_INSTALL_TEST:-}" != "1" ]; then
 fi
 
 SRC="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WANTS=/etc/systemd/system/multi-user.target.wants/violoop-mem.service
+WANTS=/etc/systemd/system/multi-user.target.wants/violoop-mem-ov.service
 PASS=0; FAIL=0
 ok(){ echo "  ✓ $1"; PASS=$((PASS+1)); }
 no(){ echo "  ✗ $1"; FAIL=$((FAIL+1)); }
@@ -37,15 +37,15 @@ if [ -d /run/systemd/system ]; then
 fi
 
 build_deb() {  # $1=版本 $2=输出路径
-  rm -rf /tmp/pkg && mkdir -p /tmp/pkg/DEBIAN /tmp/pkg/lib/systemd/system /tmp/pkg/opt/violoop-mem
-  cp "$SRC/deploy/violoop-mem.service" /tmp/pkg/lib/systemd/system/
-  cp "$SRC/deploy/qmd.yaml.default"    /tmp/pkg/opt/violoop-mem/
+  rm -rf /tmp/pkg && mkdir -p /tmp/pkg/DEBIAN /tmp/pkg/lib/systemd/system /tmp/pkg/opt/violoop-mem-ov
+  cp "$SRC/deploy/violoop-mem-ov.service" /tmp/pkg/lib/systemd/system/
+  cp "$SRC/deploy/qmd.yaml.default"    /tmp/pkg/opt/violoop-mem-ov/
   cat > /tmp/pkg/DEBIAN/control <<CTL
-Package: violoop-mem
+Package: violoop-mem-ov
 Version: $1
 Architecture: all
 Maintainer: violoop <josley@bvio.ai>
-Description: violoop-mem maintainer-script harness (payload trimmed)
+Description: violoop-mem-ov maintainer-script harness (payload trimmed)
 CTL
   for s in preinst postinst prerm postrm; do
     cp "$SRC/scripts/deb/$s.sh" "/tmp/pkg/DEBIAN/$s"; chmod 0755 "/tmp/pkg/DEBIAN/$s"
@@ -54,9 +54,9 @@ CTL
 }
 
 reset_box() {
-  dpkg --purge violoop-mem >/dev/null 2>&1
+  dpkg --purge violoop-mem-ov >/dev/null 2>&1
   rm -rf /etc/systemd/system/multi-user.target.wants /var/lib/systemd/deb-systemd-helper-enabled
-  rm -f /etc/systemd/system/violoop-mem.service
+  rm -f /etc/systemd/system/violoop-mem-ov.service
 }
 
 build_deb 0.0.1 /tmp/v1.deb
@@ -68,7 +68,7 @@ reset_box
 dpkg -i /tmp/v1.deb >/tmp/a.log 2>&1
 check "dpkg -i 成功" '! grep -q "^dpkg: error" /tmp/a.log'
 check "wants symlink 生成了" '[ -L "$WANTS" ]'
-check "指向 /lib 里的 unit" '[ "$(readlink "$WANTS")" = /lib/systemd/system/violoop-mem.service ]'
+check "指向 /lib 里的 unit" '[ "$(readlink "$WANTS")" = /lib/systemd/system/violoop-mem-ov.service ]'
 check "没试图连 D-Bus / 报 systemd 离线" '! grep -Eqi "Failed to connect to (bus|system scope)|D-Bus" /tmp/a.log'
 check "输出无 error" '! grep -qi "error" /tmp/a.log'
 
@@ -90,7 +90,7 @@ echo
 echo "== D 卸载清干净,重装又能自启 =="
 reset_box; dpkg -i /tmp/v1.deb >/dev/null 2>&1
 check "装完 symlink 在" '[ -L "$WANTS" ]'
-dpkg --purge violoop-mem >/tmp/d.log 2>&1
+dpkg --purge violoop-mem-ov >/tmp/d.log 2>&1
 check "purge 后 symlink 清掉了" '[ ! -e "$WANTS" ]'
 check "purge 无 error" '! grep -qi "error" /tmp/d.log'
 dpkg -i /tmp/v1.deb >/dev/null 2>&1
@@ -99,20 +99,20 @@ check "重装后自启恢复(状态没被 disable 污染)" '[ -L "$WANTS" ]'
 echo
 echo "== E 陈旧 /etc/systemd/system 副本(rsync 时代遗留) =="
 reset_box
-mkdir -p /etc/systemd/system && echo "# 旧的手装 unit" > /etc/systemd/system/violoop-mem.service
+mkdir -p /etc/systemd/system && echo "# 旧的手装 unit" > /etc/systemd/system/violoop-mem-ov.service
 dpkg -i /tmp/v1.deb >/tmp/e.log 2>&1
-check "内容不同的陈旧副本被清掉" '[ ! -e /etc/systemd/system/violoop-mem.service ]'
+check "内容不同的陈旧副本被清掉" '[ ! -e /etc/systemd/system/violoop-mem-ov.service ]'
 check "同时 wants symlink 也建了" '[ -L "$WANTS" ]'
 
 echo
 echo "== F 存量盒子:wants symlink 悬空指向 /etc(.44 真机就是这样) =="
 reset_box
 mkdir -p /etc/systemd/system/multi-user.target.wants
-ln -s /etc/systemd/system/violoop-mem.service "$WANTS"
+ln -s /etc/systemd/system/violoop-mem-ov.service "$WANTS"
 check "前提:symlink 悬空" '[ -L "$WANTS" ] && [ ! -e "$WANTS" ]'
 dpkg -i /tmp/v1.deb >/tmp/f.log 2>&1
 check "装完不再悬空" '[ -e "$WANTS" ]'
-check "改指向 /lib 里的 unit" '[ "$(readlink "$WANTS")" = /lib/systemd/system/violoop-mem.service ]'
+check "改指向 /lib 里的 unit" '[ "$(readlink "$WANTS")" = /lib/systemd/system/violoop-mem-ov.service ]'
 
 echo
 echo "──────────── $PASS passed, $FAIL failed ────────────"

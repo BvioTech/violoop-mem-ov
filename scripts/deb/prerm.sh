@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-UNIT=violoop-mem.service
+UNIT=violoop-mem-ov.service
 
 case "$1" in
   remove|deconfigure)

@@ -87,6 +87,6 @@ def report(data_dir):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--data-dir', default='/var/lib/violoop-mem')
+    parser.add_argument('--data-dir', default='/var/lib/violoop-mem-ov')
     args = parser.parse_args()
     print(json.dumps(report(args.data_dir), ensure_ascii=False, indent=2))
