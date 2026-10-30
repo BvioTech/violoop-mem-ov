@@ -699,7 +699,7 @@
           "path": "Cargo.lock",
           "sha256": "a9a571f9567ceaee7afab2242dd8b2a7ee00a0283b1521189abe9d9449032792",
           "destination": "engine/Cargo.lock",
-          "integration_sha256": "46b03bead12bd991db19266b8f1fd46f61b390f2449864630e5522532775b86e"
+          "integration_sha256": "ee1069efe35bd4adf80f30e93649ae6af4590f994c2dc3405f6b1323a727c9c8"
         },
         {
           "path": "Cargo.toml",
@@ -27252,7 +27252,7 @@
           "path": "uv.lock",
           "sha256": "e9a11247250cbd291bb55345ebffd24d3049155cfc4c43041ebab73243da03ea",
           "destination": "engine/uv.lock",
-          "integration_sha256": "fb41bcd61bf675a646b2fe5e2c1e3fe465a774a74bfc14fafbc40cea20e36acf"
+          "integration_sha256": "4e3fa18cbfe5407a25d4d666abacaaba33bfaf932a599003048df4e99611926b"
         },
         {
           "path": "web-studio/.cta.json",

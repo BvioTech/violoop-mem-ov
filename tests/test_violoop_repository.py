@@ -91,9 +91,11 @@ def test_retained_tests_do_not_import_retired_applications():
 
 def test_ci_build_uses_device_runtime_and_release_is_tag_only():
     import yaml
-    workflow = yaml.safe_load((ROOT / '.github/workflows/build-release.yml').read_text())
-    assert workflow['on']['push'] == {'branches': ['main'], 'tags': ['v*']}
-    assert workflow['on']['pull_request']['branches'] == ['main']
+    workflow = yaml.safe_load((ROOT / '.github/workflows/build.yml').read_text())
+    assert workflow['on']['push'] == {'tags': ['v*']}
+    assert 'pull_request' not in workflow['on']
+    test_workflow = yaml.safe_load((ROOT / '.github/workflows/test.yml').read_text())
+    assert test_workflow['on']['pull_request']['branches'] == ['main']
     assert workflow['permissions'] == {'contents': 'read'}
     jobs = workflow['jobs']
     assert jobs['build']['needs'] == 'service'
@@ -127,13 +129,13 @@ def test_ci_build_uses_device_runtime_and_release_is_tag_only():
     loop = next(node for node in tree.body if isinstance(node, ast.For) and isinstance(node.target, ast.Name) and node.target.id == 'name')
     files = set()
     exec(compile(ast.Module(body=[loop], type_ignores=[]), 'source-file-selection', 'exec'), {'ROOT': ROOT, 'files': files})
-    assert '.github/workflows/build-release.yml' in files
+    assert '.github/workflows/build.yml' in files
     assert 'tests/test_violoop_repository.py' in files
 
 
 def test_ci_version_check_rejects_wrong_tag_platform_arch_and_node():
     import yaml
-    workflow = yaml.safe_load((ROOT / '.github/workflows/build-release.yml').read_text())
+    workflow = yaml.safe_load((ROOT / '.github/workflows/build.yml').read_text())
     step = next(step for step in workflow['jobs']['build']['steps'] if step['name'] == 'Check device platform and release version')
     code = step['run'].partition("node <<'JS'\n")[2].rpartition('\nJS')[0]
     assert code
@@ -165,7 +167,7 @@ for (const [changes, shouldFail] of [
 def test_ci_apt_notification_signs_exact_body_and_fails_closed():
     import os
     import yaml
-    workflow = yaml.safe_load((ROOT / '.github/workflows/build-release.yml').read_text())
+    workflow = yaml.safe_load((ROOT / '.github/workflows/build.yml').read_text())
     step = next(step for step in workflow['jobs']['notify-apt']['steps'] if step['name'] == 'Notify APT repository')
     code = step['run'].partition("node <<'JS'\n")[2].rpartition('\nJS')[0]
     assert code
