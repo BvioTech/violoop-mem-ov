@@ -1,19 +1,16 @@
-name: CI and Release
+name: Build and Release
 
 "on":
   push:
-    branches: [main]
     tags: ["v*"]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: mem-ov-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: mem-ov-build-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   NODE_VERSION: "24"
