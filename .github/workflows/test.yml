@@ -1,0 +1,40 @@
+name: Tests
+
+"on":
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mem-ov-test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+  NPM_CONFIG_FETCH_RETRIES: "5"
+
+jobs:
+  service:
+    name: Service regression tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install service test dependencies
+        run: npm ci --omit=optional --no-audit --no-fund
+
+      - name: Service tests
+        run: npm run test:service
