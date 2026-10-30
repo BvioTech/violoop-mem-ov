@@ -1,6 +1,6 @@
 {
   "name": "violoop-mem-ov",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "VioLoop managed memory service with an in-repository OpenViking engine",
   "license": "AGPL-3.0",
   "repository": {
