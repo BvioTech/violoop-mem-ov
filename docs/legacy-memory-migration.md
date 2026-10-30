@@ -70,7 +70,7 @@ state.json 中每个批次的 `attempt`（0 为首次）表示当前尝试，`at
 
 ## 部署和验证
 
-首次接入迁移需要一起更新 violoop-mem、violoop-device、violoop-pc，以及带迁移输入识别能力的 OpenViking 运行时。上述补跑能力只需更新 violoop-mem，复用现有 Device/PC 的启动入口和 OpenViking 的标准提交接口。Memory 打包清单包含新增模块和 tokenizer，OpenViking 仍通过 scripts/build-openviking-runtime.py 打包选定源码。
+首次接入迁移需要一起更新 violoop-mem-ov、violoop-device、violoop-pc，以及带迁移输入识别能力的 OpenViking 运行时。上述补跑能力只需更新 violoop-mem-ov，复用现有 Device/PC 的启动入口和 OpenViking 的标准提交接口。Memory 打包清单包含新增模块和 tokenizer，OpenViking 仍通过 scripts/build-openviking-runtime.py 打包选定源码。
 
 `npm run test:openviking` 覆盖数据库只读、来源覆盖、高度节点、完整超大材料、断点恢复、来源计数、journal 终态和 HTTP 按钮入口。Device 包含迁移 RPC 和 Gemma 排除的定向测试。测试使用临时数据库和原生/模型模拟接口，不代表真实用户数据库迁移或模型输出质量验证。
 ## 分阶段耗时统计
@@ -82,7 +82,7 @@ state.json 中每个批次的 `attempt`（0 为首次）表示当前尝试，`at
 只读导出：
 
 ```sh
-python3 /opt/violoop-mem/scripts/migration-timing-report.py --data-dir /var/lib/violoop-mem > migration-timing-report.json
+python3 /opt/violoop-mem-ov/scripts/migration-timing-report.py --data-dir /var/lib/violoop-mem-ov > migration-timing-report.json
 ```
 
 阶段耗时为包含子阶段的累计时间，并发阶段可重叠，不能相加当作批次总耗时。报告保留每次尝试的独立任务/墙钟时间、每阶段次数/累计/最大耗时、失败次数和未结束 span，批次汇总包含历史失败尝试与补跑；崩溃留下的部分记录可定位中断阶段。旧任务没有新计时事件时不会补造数据。报告工具本身没有重置、删除、重新提交迁移或修改旧数据库的操作。

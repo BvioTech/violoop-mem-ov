@@ -1,10 +1,10 @@
-# nfpm config — violoop-mem-model_<version>_arm64.deb:violoop-mem 的
+# nfpm config — violoop-mem-ov-model_<version>_arm64.deb:violoop-mem-ov 的
 # 嵌入模型包(bge-m3 Q8 GGUF,~605MB)。接替 violoop-qmd-model 的角色,
 # 但不 conflicts 它(两个模型文件路径不同,可共存;embedder 按候选优先级
 # 取 bge-m3)。由 scripts/build-model-deb.sh 构建(内含 md5 钉死校验——
 # 同名 GGUF 不同转换批次余弦分布可差 0.2,mac/盒子曾同名不同文件,必须锁)。
 
-name: violoop-mem-model
+name: violoop-mem-ov-model
 arch: arm64
 platform: linux
 version: ${VERSION}
@@ -13,12 +13,12 @@ section: utils
 priority: optional
 maintainer: josley <josley@bvio.ai>
 description: |
-  Embedding model for violoop-mem: bge-m3 Q8_0 GGUF (dim 1024, multilingual,
+  Embedding model for violoop-mem-ov: bge-m3 Q8_0 GGUF (dim 1024, multilingual,
   no prompt-prefix convention). Installed to
-  /usr/local/share/violoop/mem/models/. Pinned by md5 at build time.
+  /usr/local/share/violoop/mem-ov/models/. Pinned by md5 at build time.
 
 contents:
   - src: ./dist/model-stage/bge-m3-q8_0.gguf
-    dst: /usr/local/share/violoop/mem/models/bge-m3-q8_0.gguf
+    dst: /usr/local/share/violoop/mem-ov/models/bge-m3-q8_0.gguf
     file_info:
       mode: 0644

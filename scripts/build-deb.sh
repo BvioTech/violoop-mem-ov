@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-deb.sh — build the violoop-mem Debian package for aarch64.
+# build-deb.sh — build the violoop-mem-ov Debian package for aarch64.
 #
 # 部署方式承袭 violoop-qmd:在 aarch64 主机(如 .44 盒子)上原生构建,
 # `npm ci --omit=dev --include=optional` 装生产依赖(better-sqlite3 预编译经
@@ -59,7 +59,7 @@ if [ ! -x .venv/bin/python ] || [ "$(.venv/bin/python -c 'import sys; print("%s.
 fi
 
 VERSION="$(node -p "require('./package.json').version")"
-OUT_DEB="dist/violoop-mem_${VERSION}_arm64.deb"
+OUT_DEB="dist/violoop-mem-ov_${VERSION}_arm64.deb"
 echo ">> Building $OUT_DEB"
 
 echo ">> npm ci (production deps + platform-native optionals)"

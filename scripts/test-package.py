@@ -8,7 +8,7 @@ import tempfile
 from common import ROOT, PYTHON, run, test_environment
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("--app-root", type=Path, help="Actual extracted /opt/violoop-mem directory")
+parser.add_argument("--app-root", type=Path, help="Actual extracted /opt/violoop-mem-ov directory")
 parser.add_argument("--python", type=Path, default=PYTHON)
 args = parser.parse_args()
 config = {'contents': []}
@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='mem-package-') as directory:
     for item in config['contents']:
         if args.app_root: break
         destination = item['dst']
-        prefix = '/opt/violoop-mem/'
+        prefix = '/opt/violoop-mem-ov/'
         if not destination.startswith(prefix): continue
         source = ROOT / item['src']
         target = stage / destination[len(prefix):]

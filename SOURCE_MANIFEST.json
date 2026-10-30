@@ -29,9 +29,9 @@
           "integration_sha256": "112c2aaa87aa651bd06bbfab817387af6a3b38791d9e81f45f8f7ce476bedd0a"
         },
         {
-          "path": "deploy/violoop-mem.service",
+          "path": "deploy/violoop-mem-ov.service",
           "sha256": "5f64157082c4e9a05b2aa51019b951cbf62b4c053a00459480bd0d36efb0632a",
-          "destination": "deploy/violoop-mem.service",
+          "destination": "deploy/violoop-mem-ov.service",
           "integration_sha256": "d23431181a2a3849dc7b2ab980799a61f399e1fcfae2da65d0531bce9119f1f2"
         },
         {

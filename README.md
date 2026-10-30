@@ -25,7 +25,7 @@ npm run setup -- --bootstrap-rust
 
 ## 启动
 
-生产环境仍使用 `/run/violoop-mem/violoop-mem.sock`、`/var/lib/violoop-mem` 和 `violoop-mem.service`。源码启动会自动选择本仓库的 `.venv` 和 `engine`。
+生产环境仍使用 `/run/violoop-mem-ov/violoop-mem-ov.sock`、`/var/lib/violoop-mem-ov` 和 `violoop-mem-ov.service`。源码启动会自动选择本仓库的 `.venv` 和 `engine`。
 
 本地独立试验必须使用单独的数据目录、socket、端口：
 
@@ -49,7 +49,7 @@ npm run build
 python3 scripts/build-openviking-runtime.py --replace
 npm run test:package
 # Linux ARM64 构建后自动执行，也可独立检查已有包：
-bash scripts/check-deb.sh dist/violoop-mem_<version>_arm64.deb
+bash scripts/check-deb.sh dist/violoop-mem-ov_<version>_arm64.deb
 ```
 
 单元/契约测试覆盖迁移、失败重试、提交结果未确认按失败处理、任务恢复、图谱增量更新、记忆 CRUD、检索与模型网关。原生集成测试启动真实 Python/C++/Rust 引擎，使用确定性模型替身；它验证工程链路，不评估模型质量。所有测试数据都在临时目录，测试结束清理，不访问当前模拟器数据。
@@ -62,9 +62,9 @@ GitHub Actions 在 main 的 push/PR 和手动触发时运行服务回归、原�
 
 向 `BvioTech/violoop-mem-ov` 推送 `v<package.json version>` tag 才发布 GitHub Release；其他触发只构建、不发布。所有 `.deb` 和逐包 `.sha256` 附件上传完成后才公开 Release，带 `-` 的版本标记为 prerelease。不会覆盖已有同名 Release；失败后留下的草稿需要先检查，不能直接重复发布同一版本。
 
-发布前，在本仓库 Actions Secrets 配置 `APT_WEBHOOK_SECRET`，与 APT 服务的 `WEBHOOK_SECRET` 一致。APT 服务白名单须将 `violoop-mem_*_arm64.deb` 的来源迁移到 `BvioTech/violoop-mem-ov`，并给服务端 GitHub token 新仓库读取权限后重新部署。如果模型包继续由旧 `BvioTech/violoop-mem` 发布，旧条目只保留 `violoop-mem-model_*_arm64.deb`，不要让两个来源发布同名服务包。
+发布前，在本仓库 Actions Secrets 配置 `APT_WEBHOOK_SECRET`，与 APT 服务的 `WEBHOOK_SECRET` 一致。APT 服务白名单须包含 `BvioTech/violoop-mem-ov` 发布的 `violoop-mem-ov_*_arm64.deb`，并给服务端 GitHub token 本仓库读取权限。
 
-Release 发布后，独立的 APT 通知任务使用真实仓库名和 tag 向现有 webhook 发送 HMAC-SHA256 签名通知；缺少密钥或响应不是 202 会使该任务失败，可在配置修正后仅重跑失败任务，无需覆盖 Release。202 只代表后台同步已入队，仍需检查 APT 索引确认版本可见。模型包独立发布，不随服务 CI 重打；APT 源须已有 `violoop-mem-model >= 1.0.0`。
+Release 发布后，独立的 APT 通知任务使用真实仓库名和 tag 向现有 webhook 发送 HMAC-SHA256 签名通知；缺少密钥或响应不是 202 会使该任务失败，可在配置修正后仅重跑失败任务，无需覆盖 Release。202 只代表后台同步已入队，仍需检查 APT 索引确认版本可见。模型包独立发布，不随服务 CI 重打；APT 源须已有 `violoop-mem-ov-model >= 1.0.0`。
 
 ## 旧记忆保护
 

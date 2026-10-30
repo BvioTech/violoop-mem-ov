@@ -116,8 +116,8 @@ async function start(config, { runtimeOptions } = {}) {
   }
   app.resume?.() // Resume receipt monitoring only after this process owns its sockets.
   if (background?.paused) background.reconcile()
-  console.log(`[violoop-mem] OpenViking adapter listening: ${config.socket}`)
-  console.log(`[violoop-mem] backend=openviking; adapter state=${config.dataDir}`)
+  console.log(`[violoop-mem-ov] OpenViking adapter listening: ${config.socket}`)
+  console.log(`[violoop-mem-ov] backend=openviking; adapter state=${config.dataDir}`)
   let shutdownPromise
   const shutdown = () => {
     if (shutdownPromise) return shutdownPromise
@@ -141,7 +141,7 @@ async function start(config, { runtimeOptions } = {}) {
 }
 
 if (require.main === module) start(loadConfig()).catch(err => {
-  console.error('[violoop-mem] startup failed:', err.message)
+  console.error('[violoop-mem-ov] startup failed:', err.message)
   process.exitCode = 1
 })
 module.exports = { start, createApp: (...args) => require('./openviking_adapter').createApp(...args) }

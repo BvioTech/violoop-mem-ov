@@ -1,15 +1,15 @@
 {
-  "name": "violoop-mem",
+  "name": "violoop-mem-ov",
   "version": "0.12.1",
   "description": "VioLoop managed memory service with an in-repository OpenViking engine",
   "main": "service/server.js",
   "bin": {
-    "violoop-mem": "./service/server.js"
+    "violoop-mem-ov": "./service/server.js"
   },
   "scripts": {
     "start": "node service/server.js",
-    "start:linux": "node service/server.js --socket /run/violoop-mem/violoop-mem.sock",
-    "start:win": "node service/server.js --socket \\\\.\\pipe\\violoop-mem",
+    "start:linux": "node service/server.js --socket /run/violoop-mem-ov/violoop-mem-ov.sock",
+    "start:win": "node service/server.js --socket \\\\.\\pipe\\violoop-mem-ov",
     "setup": "python3 scripts/setup.py",
     "test": "node --test service/test/background.js service/test/openviking.js service/test/openviking_graph.js service/test/openviking_consolidation.js service/test/event_time_decay.js service/test/managed.js service/test/legacy_migration.js service/test/agent_memory.js service/test/migration_timing.js service/test/migration_embedding.js && python3 scripts/test-engine.py",
     "test:service": "node --test service/test/background.js service/test/openviking.js service/test/openviking_graph.js service/test/openviking_consolidation.js service/test/event_time_decay.js service/test/managed.js service/test/legacy_migration.js service/test/agent_memory.js service/test/migration_timing.js service/test/migration_embedding.js",

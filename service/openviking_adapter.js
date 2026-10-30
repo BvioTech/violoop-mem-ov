@@ -597,7 +597,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
       throw fail('not_found', `no route for ${req.method} ${p}`, 404)
     } catch (err) {
       if (req.method === 'GET' && err.upstreamStatus === 404) return json(res, 404, { error: { code: 'not_found', message: 'Memory URI not found' } })
-      if (!err.status) console.error('[violoop-mem] adapter error:', err.message)
+      if (!err.status) console.error('[violoop-mem-ov] adapter error:', err.message)
       return json(res, err.status || 500, { error: { code: err.code || 'internal', message: err.status ? err.message : 'internal error' } })
     }
   }
