@@ -27250,9 +27250,9 @@
         },
         {
           "path": "uv.lock",
-          "sha256": "e9a11247250cbd291bb55345ebffd24d3049155cfc4c43041ebab73243da03ea",
+          "sha256": "b73b14bdd3232f7dea7298dc7b169d37295620ca9fba71e15d0b3de003cfdd25",
           "destination": "engine/uv.lock",
-          "integration_sha256": "4e3fa18cbfe5407a25d4d666abacaaba33bfaf932a599003048df4e99611926b"
+          "integration_sha256": "b73b14bdd3232f7dea7298dc7b169d37295620ca9fba71e15d0b3de003cfdd25"
         },
         {
           "path": "web-studio/.cta.json",
