@@ -15,7 +15,7 @@ version: ${VERSION}
 version_schema: semver
 section: utils
 priority: optional
-maintainer: josley <josley@bvio.ai>
+maintainer: doctor <doctor@bvio.ai>
 description: |
   Violoop memory service with an OpenViking backend and device-compatible
   recall/search/ingest APIs over Unix socket. Bundles and supervises the native
