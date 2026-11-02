@@ -37,7 +37,7 @@ depends:
   - python3 (>= 3.11)
   - python3 (<< 3.12)
   - libstdc++6
-  - violoop-mem-ov-model (>= 1.0.0)
+  - violoop-mem-model (>= 1.0.0)
 
 # 0.9.0 起与 violoop-qmd **并装共存**(不 conflicts、不 replaces):
 # 两服务各有用户与 socket(0.8.0 身份分离),qmd 原封不动,edge 侧
