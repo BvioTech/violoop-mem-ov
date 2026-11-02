@@ -174,7 +174,8 @@
         {
           "path": "scripts/build-model-deb.sh",
           "sha256": "7af0441ade8f44bd8540cb627cf362ca0eb8ed88061f344be938412d55d5a41a",
-          "destination": "scripts/build-model-deb.sh"
+          "destination": "scripts/build-model-deb.sh",
+          "disposition": "omitted"
         },
         {
           "path": "scripts/build-openviking-runtime.py",
@@ -217,7 +218,8 @@
         {
           "path": "scripts/nfpm-model.yaml",
           "sha256": "d7165269fc84b662662d35486e0cf5877254c92928557bb1fe47710b57461502",
-          "destination": "scripts/nfpm-model.yaml"
+          "destination": "scripts/nfpm-model.yaml",
+          "disposition": "omitted"
         },
         {
           "path": "scripts/nfpm.yaml",
@@ -32307,6 +32309,8 @@
   },
   "service_scope_removal": {
     "deleted_files": [
+      "scripts/build-model-deb.sh",
+      "scripts/nfpm-model.yaml",
       "engine/openviking/eval/README.md",
       "engine/openviking/eval/datasets/local_doc_example_glm5.jsonl",
       "engine/openviking/eval/ragas/__init__.py",

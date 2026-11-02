@@ -9,7 +9,7 @@
 #     对话,行为不变
 #   - config 仍读 /etc/qmd/qmd.yaml(操作员既有配置不迁;unit 的 --socket
 #     显式旗标优先于配置文件里的 socket 字段,老配置钉旧路径也不影响)
-#   - 嵌入模型:violoop-mem-ov-model deb(/usr/local/share/violoop/mem-ov/models),
+#   - 嵌入模型:violoop-mem-model deb(/usr/local/share/violoop/mem/models),
 #     遗留 violoop-qmd-model 自动兜底;缺模型退词法检索,服务照常健康
 #   - state 在 /var/lib/violoop-mem-ov(qmd 的 markdown 存量只读导入一次,
 #     /var/lib/qmd 不删不改)
