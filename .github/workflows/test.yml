@@ -17,10 +17,13 @@ env:
   NPM_CONFIG_FETCH_RETRIES: "5"
 
 jobs:
-  windows-build-commands:
-    name: Windows build commands
-    runs-on: windows-latest
+  native-build-commands:
+    name: Build commands (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 5
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -34,7 +37,7 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - name: Test Windows executable resolution
+      - name: Test native build command configuration
         run: python -m unittest discover -s tests -p test_script_commands.py -v
 
   service:

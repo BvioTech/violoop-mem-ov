@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+import sys
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / 'engine'
 VENV = ROOT / '.venv'
@@ -10,6 +11,9 @@ PYTHON = VENV / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
 VERSION = (ENGINE / 'VIOLOOP_ENGINE_VERSION').read_text().strip()
 def environment():
     env = dict(os.environ)
+    if sys.platform == 'darwin':
+        # Match the desktop app's minimum OS for native code and wheel tags.
+        env.setdefault('MACOSX_DEPLOYMENT_TARGET', '14.4')
     bins = [str(VENV / ('Scripts' if os.name == 'nt' else 'bin')), str(ROOT / '.build-tools/cargo/bin')]
     env['PATH'] = os.pathsep.join(bins + [env.get('PATH', '')])
     if (ROOT / '.build-tools/rustup').exists():
