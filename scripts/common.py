@@ -20,7 +20,13 @@ def environment():
     return env
 def run(*args, cwd=ROOT, **kwargs):
     print('+', ' '.join(str(a) for a in args), flush=True)
-    return subprocess.run([str(a) for a in args], cwd=cwd, env=kwargs.pop("env", environment()), check=True, **kwargs)
+    command = [str(a) for a in args]
+    env = kwargs.pop("env", environment())
+    if os.name == 'nt':
+        # CreateProcess does not search PATHEXT like a shell does. Resolve npm's
+        # .cmd shim (and checkout-local tools) against the child's PATH first.
+        command[0] = shutil.which(command[0], path=env.get('PATH') if env is not None else None) or command[0]
+    return subprocess.run(command, cwd=cwd, env=env, check=True, **kwargs)
 def require_node():
     result = run('node', '-p', 'process.versions.node.split(".")[0]', capture_output=True, text=True)
     if result.stdout.strip() != '24': raise SystemExit('Use Node.js 24 (native SQLite ABI).')
