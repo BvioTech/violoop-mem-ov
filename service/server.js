@@ -130,22 +130,33 @@ async function start(config, { runtimeOptions } = {}) {
   let shutdownPromise
   const shutdown = () => {
     if (shutdownPromise) return shutdownPromise
-    process.removeListener('SIGTERM', shutdown)
-    process.removeListener('SIGINT', shutdown)
     const closingApp = (async () => { await background?.stop(); await app.close?.() })()
-    socketServer.close()
-    if (httpServer) httpServer.close()
+    const closingServers = [socketServer, httpServer].filter(Boolean).map(server => new Promise((resolve, reject) => {
+      server.close(err => err && err.code !== 'ERR_SERVER_NOT_RUNNING' ? reject(err) : resolve())
+    }))
     // Keep-alive clients must not keep a systemd stop pending indefinitely.
     const timer = setTimeout(() => {
       socketServer.closeAllConnections()
       if (httpServer) httpServer.closeAllConnections()
     }, 2000)
     timer.unref()
-    shutdownPromise = closingApp.then(() => runtime?.stop())
+    // A second signal must not terminate Node while Python still owns storage.
+    // Keep the force-close timer and signal handlers until every listener and
+    // subsystem settles, including when one cleanup fails before sockets drain.
+    shutdownPromise = Promise.allSettled([
+      closingApp.finally(() => runtime?.stop()), ...closingServers,
+    ]).then(results => {
+      const failure = results.find(result => result.status === 'rejected')
+      if (failure) throw failure.reason
+    }).finally(() => {
+      clearTimeout(timer)
+      process.removeListener('SIGTERM', shutdown)
+      process.removeListener('SIGINT', shutdown)
+    })
     return shutdownPromise
   }
-  process.once('SIGTERM', shutdown)
-  process.once('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', shutdown)
   return { client, socketServer, httpServer, runtime, background, shutdown }
 }
 

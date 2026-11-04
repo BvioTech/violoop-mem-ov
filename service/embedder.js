@@ -6,8 +6,9 @@
  * Model resolution order (first hit wins):
  *   1. config embedding.model_path (absolute file)
  *   2. $QMD_MODELS_DIR/<candidate>(候选按 MODEL_CANDIDATES 优先级)
- *   3. /usr/local/share/violoop/mem/models/<candidate>(violoop-mem-model deb)
- *   4. /usr/local/share/violoop/qmd/models/<candidate>(遗留 qmd-model deb)
+ *   3. <service root>/models/<candidate> (source checkout)
+ *   4. /usr/local/share/violoop/mem/models/<candidate>(violoop-mem-model deb)
+ *   5. /usr/local/share/violoop/qmd/models/<candidate>(遗留 qmd-model deb)
  *
  * Unlike qmd there is NO automatic HuggingFace download fallback: on the
  * GFW-side boxes that hangs boot-adjacent code paths. Missing model (or
@@ -31,6 +32,7 @@ const { spawn } = require('child_process')
 // embeddinggemma(遗留 violoop-qmd-model deb)兜底——过渡期老盒子没装新
 // 模型包时自动退回 gemma 继续工作。
 const MODEL_CANDIDATES = ['bge-m3-q8_0.gguf', 'embeddinggemma-300M-Q8_0.gguf']
+const LOCAL_MODELS_DIR = path.resolve(__dirname, '../models')
 const SYSTEM_MODELS_DIRS = [
   '/usr/local/share/violoop/mem/models',
   '/usr/local/share/violoop/qmd/models',
@@ -153,7 +155,7 @@ class Embedder {
 
   resolveModelPath() {
     const candidates = [this.explicitModelPath].filter(Boolean)
-    const dirs = [process.env.QMD_MODELS_DIR, ...SYSTEM_MODELS_DIRS].filter(Boolean)
+    const dirs = [process.env.QMD_MODELS_DIR, LOCAL_MODELS_DIR, ...SYSTEM_MODELS_DIRS].filter(Boolean)
     for (const dir of dirs) for (const f of MODEL_CANDIDATES) candidates.push(path.join(dir, f))
     for (const p of candidates) {
       try { if (fs.existsSync(p) && fs.statSync(p).size > 0) return p } catch { /* unreadable */ }
@@ -176,7 +178,7 @@ class Embedder {
     this.state = 'loading'
     const modelPath = this.resolveModelPath()
     if (!modelPath) {
-      console.warn(`[embedder] no model found (${MODEL_CANDIDATES.join('/')} in QMD_MODELS_DIR / ${SYSTEM_MODELS_DIRS.join(' / ')}); lexical-only search`)
+      console.warn(`[embedder] no model found (${MODEL_CANDIDATES.join('/')} in QMD_MODELS_DIR / ${LOCAL_MODELS_DIR} / ${SYSTEM_MODELS_DIRS.join(' / ')}); embeddings unavailable`)
       this.state = 'unavailable'
       return
     }
