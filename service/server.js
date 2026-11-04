@@ -130,8 +130,6 @@ async function start(config, { runtimeOptions } = {}) {
   let shutdownPromise
   const shutdown = () => {
     if (shutdownPromise) return shutdownPromise
-    process.removeListener('SIGTERM', shutdown)
-    process.removeListener('SIGINT', shutdown)
     const closingApp = (async () => { await background?.stop(); await app.close?.() })()
     socketServer.close()
     if (httpServer) httpServer.close()
@@ -141,11 +139,16 @@ async function start(config, { runtimeOptions } = {}) {
       if (httpServer) httpServer.closeAllConnections()
     }, 2000)
     timer.unref()
-    shutdownPromise = closingApp.then(() => runtime?.stop())
+    // A second signal must not terminate Node while Python still owns storage.
+    shutdownPromise = closingApp.finally(() => runtime?.stop()).finally(() => {
+      clearTimeout(timer)
+      process.removeListener('SIGTERM', shutdown)
+      process.removeListener('SIGINT', shutdown)
+    })
     return shutdownPromise
   }
-  process.once('SIGTERM', shutdown)
-  process.once('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', shutdown)
   return { client, socketServer, httpServer, runtime, background, shutdown }
 }
 

@@ -36,7 +36,7 @@ QMD_MODELS_DIR=/absolute/path/to/bge-model-directory \
 npm start -- --data-dir "$PWD/.local/data" --socket "$PWD/.local/mem.sock"
 ```
 
-模型目录需含 `bge-m3-q8_0.gguf`；也可用 `--embedding-model /path/to/model.gguf`。模型不随 Git 导入。正式模型调用仍使用 Device 的 `/internal/memory/chat/completions`（默认 `127.0.0.1:9090`），可通过 `OPENVIKING_DEVICE_MODEL_URL` 指定另一个本机 Device 地址。独立测试入口会提供本地确定性模型响应，无需连接真实 Device 或云服务。
+模型目录需含 `bge-m3-q8_0.gguf`；源码运行也会查找本仓库的 `models/`，无需为该目录设置环境变量。也可用 `--embedding-model /path/to/model.gguf`。模型不随 Git 导入。正式模型调用仍使用 Device 的 `/internal/memory/chat/completions`（默认 `127.0.0.1:9090`），可通过 `OPENVIKING_DEVICE_MODEL_URL` 指定另一个本机 Device 地址。独立测试入口会提供本地确定性模型响应，无需连接真实 Device 或云服务。
 
 普通向量请求保持本地 BGE；迁移向量请求经 Device 的 `/internal/memory/embeddings`，使用当前登录用户自动领取、续期的模型网关凭证调用云端 `bge-m3`。无需单独配置迁移 URL 或密钥文件。
 

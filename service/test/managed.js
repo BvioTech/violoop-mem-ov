@@ -5,11 +5,41 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { EventEmitter } = require('events')
+const { spawn } = require('child_process')
+const { once } = require('events')
 const { startModelGateway } = require('../model_gateway')
 const { startRuntime, nativeConfig } = require('../openviking_runtime')
 
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const close = server => new Promise(resolve => { server.closeAllConnections(); server.close(resolve) })
+
+test('source and relocated runtimes discover adjacent models while preserving explicit and environment overrides', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vm-model-path-')))
+  const previous = process.env.QMD_MODELS_DIR
+  t.after(() => {
+    if (previous === undefined) delete process.env.QMD_MODELS_DIR
+    else process.env.QMD_MODELS_DIR = previous
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+  fs.mkdirSync(path.join(root, 'service'))
+  fs.copyFileSync(path.join(__dirname, '../embedder.js'), path.join(root, 'service/embedder.js'))
+  const { Embedder } = require(path.join(root, 'service/embedder.js'))
+  const local = path.join(root, 'models/bge-m3-q8_0.gguf')
+  const envModel = path.join(root, 'override/bge-m3-q8_0.gguf')
+  const explicit = path.join(root, 'explicit.gguf')
+  for (const file of [local, envModel, explicit]) {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, 'model fixture')
+  }
+  delete process.env.QMD_MODELS_DIR
+  assert.equal(new Embedder().resolveModelPath(), local)
+  process.env.QMD_MODELS_DIR = path.join(root, 'missing')
+  assert.equal(new Embedder().resolveModelPath(), local)
+  process.env.QMD_MODELS_DIR = path.dirname(envModel)
+  assert.equal(new Embedder().resolveModelPath(), envModel)
+  assert.equal(new Embedder({ modelPath: explicit }).resolveModelPath(), explicit)
+})
+
 test('BGE bridge returns real float vectors, serializes requests and rejects bad auth/model/dimension', async t => {
   let active = 0; let peak = 0
   const embedder = { async embedQuery(text) {
@@ -122,6 +152,48 @@ test('native config preserves workspace ownership and bounded workers', () => {
   assert.equal(conf.memory.link_enabled, true)
   assert.equal(conf.memory.custom_templates_dir, '/run/violoop-mem-ov/memory-templates')
   assert.equal(conf.queue_workers.session_commit.max_concurrent, 1)
+})
+
+test('repeated shutdown signals wait for native cleanup instead of abandoning the child',
+  { skip: process.platform === 'win32' }, async t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vm-stop-signals-')))
+  const marker = path.join(root, 'native-stopped')
+  const probe = http.createServer(); await listen(probe)
+  const port = probe.address().port; await close(probe)
+  const source = `
+    const fs=require('fs'),path=require('path'),{EventEmitter}=require('events');
+    const {start}=require(${JSON.stringify(path.resolve(__dirname, '../server'))});
+    const {loadConfig}=require(${JSON.stringify(path.resolve(__dirname, '../config'))});
+    (async()=>{
+      const config=loadConfig(['--socket',${JSON.stringify(path.join(root, 'mem.sock'))},'--data-dir',${JSON.stringify(root)}],{
+        OPENVIKING_URL:'http://127.0.0.1:${port}',OPENVIKING_RUNTIME_DIR:${JSON.stringify(path.join(root, 'run'))}
+      });
+      const service=await start(config,{runtimeOptions:{embedder:{status:()=>({state:'ready',dim:1024})},spawnProcess:()=>{
+        const child=new EventEmitter();child.pid=1234;child.kill=()=>{child.emit('exit',0,null);return true};return child;
+      }}});
+      const stop=service.runtime.stop;
+      service.runtime.stop=async()=>{process.stdout.write('stopping\\n');await new Promise(r=>setTimeout(r,200));await stop();fs.writeFileSync(${JSON.stringify(marker)},'done');};
+      process.stdout.write('ready\\n');
+    })().catch(e=>{console.error(e);process.exitCode=1});
+  `
+  const child = spawn(process.execPath, ['-e', source], { stdio: ['ignore', 'pipe', 'pipe'] })
+  t.after(() => { if (child.exitCode === null && !child.signalCode) child.kill('SIGKILL'); fs.rmSync(root, { recursive: true, force: true }) })
+  const exited = once(child, 'exit')
+  let output = ''; let stderr = ''
+  child.stdout.on('data', data => { output += data }); child.stderr.on('data', data => { stderr += data })
+  const untilOutput = async text => {
+    const deadline = Date.now() + 5000
+    while (!output.includes(text) && child.exitCode === null && !child.signalCode && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    assert.ok(output.includes(text), output + stderr)
+  }
+  await untilOutput('ready\n')
+  child.kill('SIGTERM')
+  await untilOutput('stopping\n')
+  child.kill('SIGINT')
+  assert.deepEqual(await exited, [0, null], stderr)
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'done')
 })
 
 test('only the native migration system instruction enables the migration model route', async t => {

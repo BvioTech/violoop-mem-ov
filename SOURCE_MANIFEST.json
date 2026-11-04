@@ -60,7 +60,7 @@
           "path": "embedder.js",
           "sha256": "eccfd770d1f88ac7076045fe0fb9d8473d6c087f29d3a970932848979846313f",
           "destination": "service/embedder.js",
-          "integration_sha256": "1db89db6679051b66b964b5b5fa1d70ca2912b8a30fd1858c79983ebb5b4d099"
+          "integration_sha256": "21b981b39a8b90857f99fe65534e8a09159bee981539a2935ba68efdf2c02ce2"
         },
         {
           "path": "event_time_decay.js",
@@ -243,7 +243,7 @@
           "path": "server.js",
           "sha256": "8d2ce671d5a6074ee28b9e7509092771dbf70b3ec2fbb3a7937d465667941d2a",
           "destination": "service/server.js",
-          "integration_sha256": "28963421d2f16c836efb9715f8fa50250110c8c26d257682056bfac9d66bf68a"
+          "integration_sha256": "4fc1d5e79be1e188bbc4509b2c4967cd727374b0c50682b135fcf8f4b9b3afed"
         },
         {
           "path": "test/agent_memory.js",
@@ -20194,7 +20194,7 @@
           "path": "pyproject.toml",
           "sha256": "2c77d80d1c420a6fc5994c5ba60e23ad57931cd1b5cce42e3999ca3dda738bb9",
           "destination": "engine/pyproject.toml",
-          "integration_sha256": "3fd7c06a26fb0b983bfa0fd89b91a6ba2316fc8fe43fff86138a9e67004896f1"
+          "integration_sha256": "04a7f09846b898a98bf1a1aa96580f9bce8c8c3dbc4f5591f6517104628ab90f"
         },
         {
           "path": "scripts/build_support/__init__.py",
@@ -27262,7 +27262,7 @@
           "path": "uv.lock",
           "sha256": "e9a11247250cbd291bb55345ebffd24d3049155cfc4c43041ebab73243da03ea",
           "destination": "engine/uv.lock",
-          "integration_sha256": "4e3fa18cbfe5407a25d4d666abacaaba33bfaf932a599003048df4e99611926b"
+          "integration_sha256": "f1114972654e6b6c273f29093d3e5dfca0a0cadb246f8e75c2ae360dc6c159a2"
         },
         {
           "path": "web-studio/.cta.json",
