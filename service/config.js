@@ -44,8 +44,8 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
   // Installed upgrades read the old daemon's database in place. Source/test
   // data directories must never discover hardware memory outside their scope.
   const legacySourceFile = env.VIOLOOP_LEGACY_MEMORY_DB ||
-    (path.resolve(dataDir) === '/var/lib/violoop-mem-ov' && !fs.existsSync(localLegacyDb)
-      && fs.existsSync('/var/lib/violoop-mem/graph.db') ? '/var/lib/violoop-mem/graph.db' : localLegacyDb)
+    (path.resolve(dataDir) === '/var/lib/violoop-mem-ov'
+      && (fs.existsSync('/opt/violoop-mem') || fs.existsSync('/var/lib/violoop-mem/graph.db')) ? '/var/lib/violoop-mem/graph.db' : localLegacyDb)
 
   const repoRoot = path.resolve(__dirname, '..')
   const bundledPython = path.resolve(repoRoot, '../runtime/python', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
@@ -62,6 +62,7 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
       deviceModelUrl: env.OPENVIKING_DEVICE_MODEL_URL || 'http://127.0.0.1:9090/internal/memory/chat/completions',
       llmMaxTokens: Number(env.OPENVIKING_LLM_MAX_TOKENS || 4096),
       legacySourceFile,
+      coexistence: legacySourceFile === '/var/lib/violoop-mem/graph.db',
       migrationEmbedding: {
         timeoutMs: Number(env.VIOLOOP_MIGRATION_EMBEDDING_TIMEOUT_MS || 60000),
       },

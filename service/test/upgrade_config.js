@@ -15,7 +15,8 @@ test('installed upgrades discover old memory read-only; isolated data and explic
   assert.equal(loadConfig(args, {}).openviking.legacySourceFile, old)
   assert.equal(loadConfig(args, {VIOLOOP_LEGACY_MEMORY_DB: '/operator/source.db'}).openviking.legacySourceFile, '/operator/source.db')
   localExists = true
-  assert.equal(loadConfig(args, {}).openviking.legacySourceFile, local)
+  assert.equal(loadConfig(args, {}).openviking.legacySourceFile, old)
+  assert.equal(loadConfig(args, {}).openviking.coexistence, true)
   assert.equal(loadConfig(['--data-dir', '/isolated/test'], {}).openviking.legacySourceFile, '/isolated/test/graph.db')
 })
 

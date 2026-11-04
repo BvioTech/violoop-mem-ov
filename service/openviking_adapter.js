@@ -302,7 +302,7 @@ class IngestJournal {
 }
 
 function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 8000,
-  abstractMaxChars = 600, readMaxChars = 6000, legacySourceFile } = {}) {
+  abstractMaxChars = 600, readMaxChars = 6000, legacySourceFile, coexistence = false } = {}) {
   if (!dataDir) throw new Error('adapter dataDir is required')
   for (const value of [recallMaxChars, searchMaxChars, abstractMaxChars, readMaxChars]) {
     if (!Number.isInteger(value) || value < 1 || value > 100000) throw new Error('content limits must be integers in [1, 100000]')
@@ -337,7 +337,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     }
   })
   const migration = new (require('./legacy_migration').LegacyMigration)({ dataDir,
-    ...(legacySourceFile ? { sourceFile: legacySourceFile } : {}), client, journal, autoResume: false })
+    ...(legacySourceFile ? { sourceFile: legacySourceFile } : {}), client, journal, coexistence, autoResume: false })
   const entries = createEntries(client)
   const consolidation = new (require('./openviking_consolidation').MemoryConsolidation)(client, graph,
     { dataDir, invalidate: () => entries.invalidate() })
@@ -572,6 +572,9 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
           decodeURIComponent(memoryMutation[1]), req.method === 'PATCH' ? await readJson(req) : {}))
       }
       if (p === '/v2/search/subgraph') throw fail('unsupported_operation', 'Use /v1/search; graph traversal is not available', 501)
+      if (req.method === 'POST' && p === '/v2/migration/activate') {
+        return json(res, 200, await migration.activate((await readJson(req)).sourceRevision))
+      }
       if (req.method === 'POST' && p === '/v2/migration/start') {
         try { return json(res, 202, await migration.start()) }
         catch (e) { throw fail('migration_unavailable', e.message, 503) }
