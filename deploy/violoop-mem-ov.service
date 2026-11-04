@@ -45,10 +45,12 @@ Group=violoop-mem-ov
 SupplementaryGroups=violoop
 # Optional pilot settings: OPENVIKING_URL/API_KEY/ACCOUNT/USER and backend.
 # OpenViking runs as this service's child; /readyz reports native readiness.
+Environment=VIOLOOP_MEM_EMBEDDING_THREADS=4
+Environment=VIOLOOP_MEM_CPU_ONLY=true
 EnvironmentFile=-/etc/violoop-mem-ov/openviking.env
 # --http-port is loopback-only (debug / graphify over an ssh tunnel); the
 # socket is the product surface.
-ExecStart=/usr/bin/node --max-old-space-size=512 /opt/violoop-mem-ov/server.js --socket /run/violoop-mem-ov/violoop-mem-ov.sock --socket-mode 0660 --socket-group violoop --data-dir /var/lib/violoop-mem-ov --http-port 7700 --http-host 127.0.0.1
+ExecStart=/usr/bin/node --max-old-space-size=512 /opt/violoop-mem-ov/server.js --socket /run/violoop-mem-ov/violoop-mem-ov.sock --socket-mode 0660 --socket-group violoop --data-dir /var/lib/violoop-mem-ov --http-port 7701 --http-host 127.0.0.1
 RuntimeDirectory=violoop-mem-ov
 RuntimeDirectoryMode=0755
 StateDirectory=violoop-mem-ov

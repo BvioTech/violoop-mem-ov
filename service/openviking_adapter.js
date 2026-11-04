@@ -273,12 +273,16 @@ class IngestJournal {
     }
     if (record.terminal) {
       if (await this.finish(record)) this.watching.delete(id)
-      return { ...record.result, ...record.terminal }
+      // Older journals did not distinguish an absent task from a confirmed
+      // native failure. Preserve the no-replay rule across an upgrade too.
+      const task = record.terminal.task
+      const unconfirmed = task?.unconfirmed || task?.error === 'Native task missing and no terminal archive marker found'
+      return { ...record.result, ...record.terminal, retryable: !unconfirmed && record.terminal.retryable !== false }
     }
     let task
     try { task = await this.client.task(record.result.taskId) } catch (e) {
       if (e.upstreamStatus !== 404) throw e
-      task = { status: 'failed', error: 'Native task missing and no terminal archive marker found' }
+      task = { status: 'failed', unconfirmed: true, error: 'Native task missing and no terminal archive marker found' }
       if (record.result.archiveUri) for (const [file, state, field] of [
         ['.done', 'completed', 'ending_message_id'], ['.failed.json', 'failed', 'error'],
       ]) {
@@ -289,16 +293,16 @@ class IngestJournal {
       }
     }
     if (['completed', 'failed', 'cancelled'].includes(task.status)) {
-      record.terminal = { status: task.status, task }
+      record.terminal = { status: task.status, task, retryable: !task.unconfirmed }
       this.save(record)
       if (await this.finish(record)) this.watching.delete(id)
     }
-    return { ...record.result, status: task.status, task }
+    return { ...record.result, status: task.status, task, retryable: !task.unconfirmed }
   }
 }
 
 function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 8000,
-  abstractMaxChars = 600, readMaxChars = 6000, legacySourceFile } = {}) {
+  abstractMaxChars = 600, readMaxChars = 6000, legacySourceFile, coexistence = false } = {}) {
   if (!dataDir) throw new Error('adapter dataDir is required')
   for (const value of [recallMaxChars, searchMaxChars, abstractMaxChars, readMaxChars]) {
     if (!Number.isInteger(value) || value < 1 || value > 100000) throw new Error('content limits must be integers in [1, 100000]')
@@ -333,13 +337,16 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     }
   })
   const migration = new (require('./legacy_migration').LegacyMigration)({ dataDir,
-    ...(legacySourceFile ? { sourceFile: legacySourceFile } : {}), client, journal, autoResume: false })
+    ...(legacySourceFile ? { sourceFile: legacySourceFile } : {}), client, journal, coexistence, autoResume: false })
   const entries = createEntries(client)
   const consolidation = new (require('./openviking_consolidation').MemoryConsolidation)(client, graph,
     { dataDir, invalidate: () => entries.invalidate() })
   const nativeMutate = createMutations(client, () => entries.invalidate())
   const manual = require('./openviking_manual')
   const mutate = async (...args) => {
+    if (migration.blocksNativeWrites()) {
+      throw fail('migration_pending', 'Native memory is not authoritative until legacy migration is activated', 409)
+    }
     const result = await nativeMutate(...args)
     // These API writes have already persisted the file when they return.
     // Indexing stays separate from the native vector-processing task.
@@ -568,6 +575,9 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
           decodeURIComponent(memoryMutation[1]), req.method === 'PATCH' ? await readJson(req) : {}))
       }
       if (p === '/v2/search/subgraph') throw fail('unsupported_operation', 'Use /v1/search; graph traversal is not available', 501)
+      if (req.method === 'POST' && p === '/v2/migration/activate') {
+        return json(res, 200, await migration.activate((await readJson(req)).sourceRevision))
+      }
       if (req.method === 'POST' && p === '/v2/migration/start') {
         try { return json(res, 202, await migration.start()) }
         catch (e) { throw fail('migration_unavailable', e.message, 503) }
@@ -576,7 +586,12 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
       if (req.method === 'POST' && p === '/v1/grep') return json(res, 200, await grepMemory(await readJson(req)))
       if (req.method === 'POST' && ['/v1/search', '/v2/search', '/v2/recall', '/v2/ingest'].includes(p)) {
         const body = await readJson(req)
-        if (p === '/v2/ingest') return json(res, 202, await journal.ingest(body))
+        if (p === '/v2/ingest') {
+          if (migration.blocksNativeWrites()) {
+            throw fail('migration_pending', 'Native memory is not authoritative until legacy migration is activated', 409)
+          }
+          return json(res, 202, await journal.ingest(body))
+        }
         if (p === '/v2/recall') {
           const text = query(body.text, 'text').slice(0, 600)
           const maxEntities = integer(body.maxEntities, 10)
@@ -602,10 +617,13 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     }
   }
   app.setPaused = paused => migration.setPaused(paused)
-  app.drainSubmissions = async () => {
-    while (journal.pending.size || migration.starting || migration.running) {
+  app.drainSubmissions = async ({ isCancelled = () => false } = {}) => {
+    // Native compile/memory runs outside QueueFS. Wait for its terminal task
+    // before system/wait drains the indexing work it can still enqueue.
+    while (!isCancelled() && (journal.pending.size || migration.starting || migration.running || consolidation.status().running)) {
       await Promise.allSettled([...journal.pending.values()])
-      if (migration.starting || migration.running) await new Promise(resolve => setTimeout(resolve, 25))
+      if (consolidation.status().running) await consolidation.poll()
+      if (!isCancelled() && (migration.starting || migration.running || consolidation.status().running)) await new Promise(resolve => setTimeout(resolve, 25))
     }
   }
   app.close = async () => { await migration.stop(); await journal.stop(); await consolidation.stop(); await graph.close() }

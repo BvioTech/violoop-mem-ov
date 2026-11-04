@@ -1,6 +1,6 @@
 const fs = require('fs')
 const path = require('path')
-const { readLegacySnapshot, hash } = require('./legacy_source')
+const { readLegacySnapshot, hash, legacyFacts } = require('./legacy_source')
 const { writeJson } = require('./durable_json')
 const { startStage, appendTiming } = require('./migration_timing')
 
@@ -27,12 +27,13 @@ function permanentFailure(error) {
 
 class LegacyMigration {
   constructor({ dataDir, sourceFile = path.join(dataDir, 'graph.db'), client, journal, pollMs = 3000, autoResume = true,
-    retryDelaysMs = AUTOMATIC_RETRY_DELAYS_MS, now = Date.now }) {
+    retryDelaysMs = AUTOMATIC_RETRY_DELAYS_MS, now = Date.now, coexistence = false }) {
     if (!Array.isArray(retryDelaysMs) || retryDelaysMs.length !== 3 || retryDelaysMs.some(ms => !Number.isFinite(ms) || ms < 0)) {
       throw new Error('Migration requires three non-negative automatic retry delays')
     }
     this.retryDelaysMs = [...retryDelaysMs]
     this.now = now
+    this.coexistence = coexistence
     this.dir = path.join(dataDir, 'legacy-migration')
     this.file = path.join(this.dir, 'state.json')
     this.issuesFile = path.join(this.dir, 'issues.json')
@@ -66,7 +67,10 @@ class LegacyMigration {
     if (this.state?.started && !this.stopped && !this.loadError) {
       clearTimeout(this.timer)
       this.timer = setTimeout(() => this.run(), 0)
-    } else if (autoStart && !this.state && !this.stopped && !this.loadError && fs.existsSync(this.sourceFile)) {
+    } else if (this.coexistence && this.state && !this.state.activatedAt && !this.stopped && !this.loadError) {
+      clearTimeout(this.timer)
+      this.timer = setTimeout(() => this.checkSource(), this.pollMs)
+    } else if (autoStart && !this.state && !this.stopped && !this.loadError && (this.coexistence || fs.existsSync(this.sourceFile))) {
       // First deployment starts automatically, after socket ownership is
       // established. Completed/failed rounds are never replayed on restart.
       clearTimeout(this.timer)
@@ -182,6 +186,11 @@ class LegacyMigration {
     return b ? { message: `Migration batch ${b.id} skipped (${b.status}): ${b.error || b.status}`,
       at: b.issueRecordedAt || null } : null
   }
+  // While coexistence is active and unactivated, resetMigrationMemory() may
+  // wipe the whole native memory tree to rebuild migration staging. Any
+  // other native write landing in that window would be destroyed by the
+  // next reset, so no native write may be accepted until activation.
+  blocksNativeWrites() { return this.coexistence && !this.state?.activatedAt }
   status() {
     if (this.loadError) throw this.loadError
     let pendingCount
@@ -189,7 +198,8 @@ class LegacyMigration {
       if (!fs.existsSync(this.sourceFile)) {
         return { backend: 'openviking', migration: true, enabled: true,
           pendingCount: 0, running: false, lastError: null, sourceAvailable: false,
-          initialized: false, totalBatches: 0, completedBatches: 0, failedBatches: 0 }
+          initialized: false, totalBatches: 0, completedBatches: 0, failedBatches: 0,
+          activated: false, readyForCutover: !this.coexistence, sourceRevision: null }
       }
       if (this.inventoryCount === undefined) {
         const s = readLegacySnapshot(this.sourceFile)
@@ -200,15 +210,86 @@ class LegacyMigration {
       const completed = new Set(this.state.batches.filter(b => b.status === 'completed').flatMap(b => b.claims))
       pendingCount = this.state.resources.filter(r => !r.claims.every(c => completed.has(c))).length
     }
+    const sourceRevision = this.state?.sourceRevision || null
+    const sourceCurrent = !this.coexistence || !!this.state?.activatedAt ||
+      (sourceRevision && fs.existsSync(this.sourceFile) && hash(JSON.stringify(legacyFacts(readLegacySnapshot(this.sourceFile)))) === sourceRevision)
+    const readyForCutover = !!this.state && !this.running && !this.starting && !this.state.started && !this.state.resetPending
+      && this.state.batches.every(b => b.status === 'completed') && !this.lastError && !this.state.lastError && !!sourceCurrent
     return { backend: 'openviking', migration: true, enabled: true,
+      activated: !!this.state?.activatedAt, activatedAt: this.state?.activatedAt || null,
+      readyForCutover, sourceRevision, sourceCurrent: !!sourceCurrent,
       initialized: !!this.state, sourceAvailable: fs.existsSync(this.sourceFile),
-      pendingCount, running: this.starting || this.running || !!this.state?.started, lastError: this.lastError || this.state?.lastError || this.lastIssue(),
+      pendingCount: sourceCurrent ? pendingCount : Math.max(1, pendingCount), running: this.starting || this.running || !!this.state?.started, lastError: this.lastError || this.state?.lastError || this.lastIssue(),
       phase: this.state?.phase || null, automaticRetryDone: !!this.state?.automaticRetryDone,
       automaticRetryCount: this.automaticRetryCount(), automaticRetryLimit: 3, nextRetryAt: this.state?.nextRetryAt || null,
       totalBatches: this.state?.batches.length || 0,
       completedBatches: this.state?.batches.filter(b => b.status === 'completed').length || 0,
       failedBatches: this.state?.batches.filter(b => b.status === 'failed').length || 0,
       lastRunAt: this.state?.lastRunAt || null, lastTickAt: this.lastTickAt || null }
+  }
+  async activate(sourceRevision) {
+    if (this.activating) return this.activating
+    this.activating = this._activate(sourceRevision).finally(() => { this.activating = null })
+    return this.activating
+  }
+  async _activate(sourceRevision) {
+    if (this.state?.activatedAt) return this.status()
+    if (!await this.client.ready()) throw Object.assign(new Error('OpenViking is not ready'), { status: 503 })
+    // Edge holds its routing fence while this synchronous source check and
+    // durable commit run. No legacy writes can cross the handoff boundary.
+    const status = this.status()
+    if (!status.readyForCutover || (sourceRevision ?? null) !== status.sourceRevision) {
+      throw Object.assign(new Error('Legacy migration has not caught up'), { status: 409 })
+    }
+    if (!this.state) throw Object.assign(new Error('Migration has not initialized'), { status: 409 })
+    this.state.activatedAt = Date.now()
+    this.save()
+    clearTimeout(this.timer)
+    return this.status()
+  }
+  async checkSource() {
+    if (this.paused || this.stopped || this.running || this.starting || this.state?.started || this.state?.activatedAt) return
+    this.starting = true
+    try {
+      if (!this.state?.batches.every(b => b.status === 'completed')) return
+      const snapshot = readLegacySnapshot(this.sourceFile)
+      const facts = legacyFacts(snapshot), revision = hash(JSON.stringify(facts))
+      if (revision === this.state.sourceRevision && !this.state.resetPending) { this.lastError = null; return }
+      const current = new Set(facts)
+      const reset = this.state.resetPending || !this.state.sourceFacts || this.state.sourceFacts.some(f => !current.has(f))
+      if (reset) {
+        // Only the migration-owned staging store may be rebuilt. Once active,
+        // native user data must never be reset because the old daemon changed.
+        if (!this.state.coexistence) throw new Error('Existing native migration requires handoff review')
+        if (!this.state.resetPending) {
+          this.state.resetPending = true
+          this.state.generation = (this.state.generation || 0) + 1
+          this.save()
+        }
+        await this.client.resetMigrationMemory()
+      }
+      const plan = require('./legacy_migration_plan').planMigration(snapshot)
+      const previous = new Map(reset ? [] : this.state.batches.map(b => [b.id, b]))
+      const generation = this.state.generation || 0
+      const batches = plan.batches.map(b => {
+        const id = generation ? hash(`${generation}:${b.id}`) : b.id
+        if (previous.has(id)) return previous.get(id)
+        const body = { episode: { sessionId: 'legacy-' + id, title: '旧记忆迁移', messages: b.messages } }
+        writeJson(path.join(this.dir, 'batches', id + '.json'), body)
+        return { id, checksum: hash(JSON.stringify(body)), claims: b.claims, groups: b.groups, tokens: b.tokens, status: 'pending' }
+      })
+      Object.assign(this.state, { batches, resources: plan.resources, sourceFacts: facts, sourceRevision: revision,
+        resetPending: false, started: true, phase: 'catch-up', automaticRetryDone: false, automaticRetryCount: 0, lastError: null })
+      this.lastError = null
+      this.save()
+    } catch (err) {
+      this.lastError = { message: err.message, at: Date.now() }
+    } finally {
+      this.starting = false
+      if (!this.stopped && !this.paused) {
+        this.timer = setTimeout(() => this.state?.started ? this.run() : this.checkSource(), this.pollMs)
+      }
+    }
   }
   async start() {
     if (this.paused) throw Object.assign(new Error('Memory background is paused'), { status: 503 })
@@ -244,6 +325,8 @@ class LegacyMigration {
           snapshotHash: hash(JSON.stringify(snapshot)), tokenizer: plan.tokenizer,
           maxTokens: plan.maxTokens, resources: plan.resources, batches, started: false,
           phase: 'primary', automaticRetryDone: false, automaticRetryCount: 0 }
+        if (this.coexistence) Object.assign(this.state, { coexistence: true, sourceFacts: legacyFacts(snapshot),
+          sourceRevision: hash(JSON.stringify(legacyFacts(snapshot))) })
         persistDone('ok', { batches: batches.length })
         this.save()
       }
@@ -252,7 +335,7 @@ class LegacyMigration {
       const runnable = this.state.batches.some(b => b.status !== 'completed' && !SKIPPED_STATUSES.has(b.status))
       if (!runnable) {
         if (this.state.batches.some(b => b.status === 'failed')) retriedBatches = this.prepareRetries('manual-retry')
-        else return { started: false, reason: 'complete' }
+        else { if (this.coexistence) this.resume(); return { started: false, reason: 'complete' } }
       }
       this.state.phase ||= 'primary' // Resume in-progress states from older releases.
       this.state.started = true
@@ -362,6 +445,8 @@ class LegacyMigration {
       if (!this.paused && !this.stopped && this.state?.started && !this.loadError) {
         const delay = this.state.nextRetryAt > this.now() ? this.state.nextRetryAt - this.now() : this.pollMs
         this.timer = setTimeout(() => this.run(), delay)
+      } else if (this.coexistence && !this.paused && !this.stopped && !this.state?.activatedAt && !this.loadError) {
+        this.timer = setTimeout(() => this.checkSource(), this.pollMs)
       }
     }
   }

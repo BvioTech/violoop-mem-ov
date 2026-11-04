@@ -142,3 +142,21 @@ test('only the native migration system instruction enables the migration model r
   assert.equal(requests[0].violoop_legacy_migration, undefined)
   assert.equal(requests[1].violoop_legacy_migration, true)
 })
+
+test('portable simulator config resolves a relocated interpreter and engine before source or system paths', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ov-portable-')))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const mem = path.join(root, 'mem')
+  const python = path.join(root, 'runtime/python', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
+  for (const file of [python, path.join(mem, 'service/config.js'), path.join(mem, 'openviking-python/openviking/server/bootstrap.py')]) {
+    fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, '')
+  }
+  fs.copyFileSync(path.join(__dirname, '../config.js'), path.join(mem, 'service/config.js'))
+  const { loadConfig } = require(path.join(mem, 'service/config.js'))
+  const config = loadConfig([], {})
+  assert.equal(config.openviking.python, python)
+  assert.equal(config.openviking.pythonPath, path.join(mem, 'openviking-python'))
+  const explicit = loadConfig([], { OPENVIKING_PYTHON: 'explicit-python', OPENVIKING_PYTHONPATH: 'explicit-engine' })
+  assert.equal(explicit.openviking.python, 'explicit-python')
+  assert.equal(explicit.openviking.pythonPath, 'explicit-engine')
+})

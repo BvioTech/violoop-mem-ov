@@ -51,4 +51,17 @@ function readLegacySnapshot(file) {
 
 // Same observation fingerprint used by the legacy provenanceByKey method.
 function observationHash(text) { return crypto.createHash('md5').update(String(text ?? '')).digest('hex') }
-module.exports = { readLegacySnapshot, observationHash, hash }
+// Access counters and graphification bookkeeping are not new user facts.
+function legacyFacts(snapshot) {
+  const facts = []
+  const add = (kind, value) => facts.push(hash(JSON.stringify([kind, value])))
+  for (const m of snapshot.memories) add('memory', [m.id, m.key, m.title, m.content, m.type, m.tags])
+  for (const e of snapshot.entities) {
+    add('entity', [e.id, e.name, e.type, e.aliases, e.properties, e.domains, e.curated])
+    for (const observation of e.observations) add('observation', [e.id, observation])
+  }
+  for (const r of snapshot.relations) add('relation', [r.id, r.source, r.target, r.relation_type,
+    r.properties, r.confidence, r.valid_until, r.decay])
+  return [...new Set(facts)].sort()
+}
+module.exports = { readLegacySnapshot, observationHash, hash, legacyFacts }

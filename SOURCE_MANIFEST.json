@@ -9,13 +9,13 @@
           "path": "config.js",
           "sha256": "6cea5346c29fc6f68ac0ce90f1cf1a288540353d133fb8dcd2c2f0752a352552",
           "destination": "service/config.js",
-          "integration_sha256": "e93ed7d53df1cc00c5ea7369eb44fafbdb4014ce6fd281f298ae1da9f9a4086f"
+          "integration_sha256": "df28d723b70f9338266c75a78cb458d9663bffb47633c5e98e402d911f1ac621"
         },
         {
           "path": "deploy/openviking-adapter.yaml",
           "sha256": "a319daa2e1f0e0ba69a90a0e1269cb68ed85cfb624bf971499d08417a5ee7047",
           "destination": "deploy/openviking-adapter.yaml",
-          "integration_sha256": "403d07c8bb8f24bfce6e45479c28927361ef86402c01f4d32edffecb3473ed31"
+          "integration_sha256": "c4d228f334fedb7fc4ef7882f85e320ca6d7ccffefe72da3635ef8fe1eea3ee2"
         },
         {
           "path": "deploy/ov.conf.example",
@@ -26,13 +26,13 @@
           "path": "deploy/qmd.yaml.default",
           "sha256": "be559396958b9f5b189e2e47f1195686ef69c79f68865137130bc512c5b5173e",
           "destination": "deploy/qmd.yaml.default",
-          "integration_sha256": "112c2aaa87aa651bd06bbfab817387af6a3b38791d9e81f45f8f7ce476bedd0a"
+          "integration_sha256": "ea96c6bb3d9fc89fa13c4ed72e85da6266400e8f40b18e0c3005f81e7b66d612"
         },
         {
           "path": "deploy/violoop-mem-ov.service",
           "sha256": "5f64157082c4e9a05b2aa51019b951cbf62b4c053a00459480bd0d36efb0632a",
           "destination": "deploy/violoop-mem-ov.service",
-          "integration_sha256": "d23431181a2a3849dc7b2ab980799a61f399e1fcfae2da65d0531bce9119f1f2"
+          "integration_sha256": "e63f87bdeaf8369726fdbbddb6f14c5361f56da10b2caf72953971a8ff6cef9e"
         },
         {
           "path": "docs/agent-memory.md",
@@ -43,13 +43,13 @@
           "path": "docs/legacy-memory-migration.md",
           "sha256": "7079fdf9f11994fc63acbc1063223970e0e32194ca454ef813a5bed7b40323da",
           "destination": "docs/legacy-memory-migration.md",
-          "integration_sha256": "afa7c4b9bc6bc773b2cf9d2f5bb7c41a887d849e96413908bd822c27cb97fc25"
+          "integration_sha256": "cede0e84aec0612396600bdef9916f5c549e595f93cdb2b35a5b68da3df79fdb"
         },
         {
           "path": "docs/managed-deployment.md",
           "sha256": "c7eb9c41f6ea1ce185beb556ca02a35e352e867108268d4f1c1670f8577eaaca",
           "destination": "docs/managed-deployment.md",
-          "integration_sha256": "10509f484440a7c902f2edfd83b72330661f82faef586936d6393801e6256608"
+          "integration_sha256": "b2920ba77462261a0d540bf967e8682b8908c62560ffeafae2be53483e3336c8"
         },
         {
           "path": "durable_json.js",
@@ -60,7 +60,7 @@
           "path": "embedder.js",
           "sha256": "eccfd770d1f88ac7076045fe0fb9d8473d6c087f29d3a970932848979846313f",
           "destination": "service/embedder.js",
-          "integration_sha256": "97b006f4a61b390a0f1672e477044e7ae5b9c0e0280bf18a38fa90449b7e2848"
+          "integration_sha256": "1db89db6679051b66b964b5b5fa1d70ca2912b8a30fd1858c79983ebb5b4d099"
         },
         {
           "path": "event_time_decay.js",
@@ -81,7 +81,7 @@
           "path": "legacy_migration.js",
           "sha256": "5a94408fb10579c9793bbbc79cecc52041036d0e4cdacbe3970fe1539d0e5ec1",
           "destination": "service/legacy_migration.js",
-          "integration_sha256": "d9dfafceea26b2d371d31d3a48c988fcbc27c60139d1ac5bc7ac17413d585ada"
+          "integration_sha256": "f1b0b2a7231e6526f7794ea72d5aaef6b1af382ff6d0e196399cbebd18c91c26"
         },
         {
           "path": "legacy_migration_plan.js",
@@ -91,7 +91,8 @@
         {
           "path": "legacy_source.js",
           "sha256": "ff05b43c7f206256938c609b65ba0104ea7c9292cd5f972c4c90ee2a7486120b",
-          "destination": "service/legacy_source.js"
+          "destination": "service/legacy_source.js",
+          "integration_sha256": "aee82142dc1c8b1d432dace03619a786d4da2e70d353884f4eeb1eb41a2740af"
         },
         {
           "path": "migration_embedding.js",
@@ -114,7 +115,7 @@
           "path": "openviking_adapter.js",
           "sha256": "ea24f404ce71756a6d8f9368bad303bbd61fc28539780862e81d0a6165acddfe",
           "destination": "service/openviking_adapter.js",
-          "integration_sha256": "dab029d7534eaa1e76f17c6fc5781fe466c27c2754a4bcd15f2bcf8571ea4f58"
+          "integration_sha256": "30fd9a0e26ea86f1d26c2e20f1bf3e44109d3ed235484fc3e417a535d60a8c9f"
         },
         {
           "path": "openviking_agent.js",
@@ -125,12 +126,13 @@
           "path": "openviking_client.js",
           "sha256": "36ea9385c2b929960a977687d02ea40a15a628e4d89320a6e6e44a6175f6d0dd",
           "destination": "service/openviking_client.js",
-          "integration_sha256": "4b247998d26a38061584c31558688e978eb4ebcafae2d28d6149b29e27947ad4"
+          "integration_sha256": "0b3560a46b94d30d7edf54268f2ff8ae9dbd492322a69393f17bb84cc247e9ea"
         },
         {
           "path": "openviking_consolidation.js",
           "sha256": "4a33efca768796c58b56ada576761af46a23b992efb0f7e724c07c6f87838923",
-          "destination": "service/openviking_consolidation.js"
+          "destination": "service/openviking_consolidation.js",
+          "integration_sha256": "3c727d8e8ac5a0113b44be0bd3c649c79a5478fdfcff9bc8767869ff99a70c33"
         },
         {
           "path": "openviking_entries.js",
@@ -169,7 +171,7 @@
           "path": "scripts/build-deb.sh",
           "sha256": "f92b41476ef98444be9a06cbe1750b59235756fc81f5bb94fc91e5a3e92d7c0d",
           "destination": "scripts/build-deb.sh",
-          "integration_sha256": "dbd829f04ac491fe80e253d5e9991c4d546b62aa2f138a1560e68335f067ee45"
+          "integration_sha256": "94935fe1961d58c31db74a2f04dc12f33a15f1fe4cb15f6c67a3dfc2f2af363a"
         },
         {
           "path": "scripts/build-model-deb.sh",
@@ -181,39 +183,43 @@
           "path": "scripts/build-openviking-runtime.py",
           "sha256": "253324ff81db73090915bef2d283f85376ba00da67d05e967842f8e812c42595",
           "destination": "scripts/build-openviking-runtime.py",
-          "integration_sha256": "ca0e0fda3df17e9ec98a7fa2d6a1d36aae2e9d837703b0ed998d7a2c35223ce6"
+          "integration_sha256": "9fc3cfa276ee4554165bd0a0d608e732cf6ad1489c4ab2ae39709aa565dd68e2"
         },
         {
           "path": "scripts/deb/postinst.sh",
           "sha256": "2a0461cd3d414171299a5673d874a1199d7f420f7ad577af6a7eb93da30def9d",
-          "destination": "scripts/deb/postinst.sh"
+          "destination": "scripts/deb/postinst.sh",
+          "integration_sha256": "b9bb807995cd84ec35e2e67ff256ff9ff467bbb467fcd1f9c45b174c5cb28c19"
         },
         {
           "path": "scripts/deb/postrm.sh",
           "sha256": "edfa8f3bef95a5828a2ceab9d8848815631ac9873189a406aef9ca3e63ad741f",
           "destination": "scripts/deb/postrm.sh",
-          "integration_sha256": "20855d2fc70f1c05c0662acc7398e9ebd32a53f18bbd6e2f5cba9134f2f17032"
+          "integration_sha256": "062617b5156ba1640647af472a4aefece205f73b0fb7ff37a44d380697eb0ed9"
         },
         {
           "path": "scripts/deb/preinst.sh",
           "sha256": "0c2d838833e576a8e27b01ade0dfc751f1779c3ed6c70e76b5bc1aa12226885e",
-          "destination": "scripts/deb/preinst.sh"
+          "destination": "scripts/deb/preinst.sh",
+          "integration_sha256": "641a505cc80bfc7948e063f532640237917354a18b00e6d3282f7f12cf5c67f4"
         },
         {
           "path": "scripts/deb/prerm.sh",
           "sha256": "b0ce08677eb353366a5b95400dc45bbfe128c87209f70682f639ba811cb0aa39",
-          "destination": "scripts/deb/prerm.sh"
+          "destination": "scripts/deb/prerm.sh",
+          "integration_sha256": "d2784a158b56b710b266d1ea3cb0c7fddab8b1629ba0a8aa3af666f0198e7f8c"
         },
         {
           "path": "scripts/deb/test-install.sh",
           "sha256": "319b8756cbf90e4c8398676440bd02ba7c7cdb152a756cde380a36530592468d",
           "destination": "scripts/deb/test-install.sh",
-          "integration_sha256": "fb3f0592e243cf818e50f32c4f2b90096744e1310dd8ed7488af643b5c1c97f6"
+          "integration_sha256": "3cca16d70291eb80606490ef2fe26aaa12874473d8eb92a08168f75c9f5a1ace"
         },
         {
           "path": "scripts/migration-timing-report.py",
           "sha256": "f780c4647146d11f5b6a2178bbcaa213bf2d7de79084533ebb651241b814b0b8",
-          "destination": "scripts/migration-timing-report.py"
+          "destination": "scripts/migration-timing-report.py",
+          "integration_sha256": "409d1af2608fe69274070980ce3b5cc2339984d3b5b4df5eb5bc3b5d24ef17aa"
         },
         {
           "path": "scripts/nfpm-model.yaml",
@@ -225,18 +231,19 @@
           "path": "scripts/nfpm.yaml",
           "sha256": "44e2dc5dcaeee141a8ab8ac4e32044ffb005c357da6d414d573654cabedb2789",
           "destination": "scripts/nfpm.yaml",
-          "integration_sha256": "7b66b7d9912232757db3971e5eb901b38c4e89aeabd059d93548eb03b51df75b"
+          "integration_sha256": "28e9d24b0d45d55901b17e50ca61b50b5ae326d7fff0a0086086041636eed0eb"
         },
         {
           "path": "scripts/openviking-live-smoke.js",
           "sha256": "0c92c7bbc76b21802e08cc5cbdabe12c4f0113f3b568bfa52c652f76fc97c11a",
-          "destination": "scripts/openviking-live-smoke.js"
+          "destination": "scripts/openviking-live-smoke.js",
+          "integration_sha256": "b12234173821efd15f4a390b9d0d89a13c2a89234100b3396023cb0056af99e2"
         },
         {
           "path": "server.js",
           "sha256": "8d2ce671d5a6074ee28b9e7509092771dbf70b3ec2fbb3a7937d465667941d2a",
           "destination": "service/server.js",
-          "integration_sha256": "f95296dba028784d458d7fed29f177bb560ce27d0b5942ea890e8cc62f6a5ca7"
+          "integration_sha256": "28963421d2f16c836efb9715f8fa50250110c8c26d257682056bfac9d66bf68a"
         },
         {
           "path": "test/agent_memory.js",
@@ -252,13 +259,13 @@
           "path": "test/legacy_migration.js",
           "sha256": "c2195ba0acc1b1e27a8ed5ebfdea5a24951e7abfbb1cc1f925de88c4b81fac4c",
           "destination": "service/test/legacy_migration.js",
-          "integration_sha256": "f6a7059e8fb6939690911aa6e605e167b5211545ede05e55d4264fd9928a8f78"
+          "integration_sha256": "77cab9f01055ed6d192daba3b5aeb8d0e97a4b3fb5b45d45199023ba705ad956"
         },
         {
           "path": "test/managed.js",
           "sha256": "84ac57b635c32f44078d8e338e40f4d143c45e7211ab03079f89f48749346ba0",
           "destination": "service/test/managed.js",
-          "integration_sha256": "4db1e538316852ccb00ec5446f02821c41f30310e29314bf7f8ce6b9b2a2fa4f"
+          "integration_sha256": "91c7e9ce8e66c55cdf91e14ccb43cf47a1ee95d069b90d386fd97352bcd24d88"
         },
         {
           "path": "test/migration_embedding.js",
@@ -282,18 +289,19 @@
           "path": "test/openviking.js",
           "sha256": "b570f0095bad7c69a67d0ff96262cbc01b753d5007fe3a64ac3f4c380a57447a",
           "destination": "service/test/openviking.js",
-          "integration_sha256": "8878b8d7dbc61658b231d4b46c01dd0225d68e029c6271471733f47c43ab6437"
+          "integration_sha256": "d21a9f6af419e162499543c6eb2613e4e95add7eaf32ef72a70e1c186356510e"
         },
         {
           "path": "test/openviking_consolidation.js",
           "sha256": "d00cd73bb2a8e4c8d73d2888528d3dfcea254997d1d0bc46be7bb50591c1f04c",
-          "destination": "service/test/openviking_consolidation.js"
+          "destination": "service/test/openviking_consolidation.js",
+          "integration_sha256": "96a69e40b07d3251254e1e5d25f57e875b5b2beeca520da5a4204591c819cb61"
         },
         {
           "path": "test/openviking_graph.js",
           "sha256": "eb7f935690a128cbefca4dd47e2e210057936b4971ce86e8d63ddec580d502db",
           "destination": "service/test/openviking_graph.js",
-          "integration_sha256": "4f5d3d6a46d5f63ba1023182767c6eb10c24e4d554cd8cde3d7b09aed698e213"
+          "integration_sha256": "a25c9f9724e2fd1fb3aba59c46b82687e6c404d15bfcbd4d4f3213e67fe5fe4d"
         }
       ]
     },

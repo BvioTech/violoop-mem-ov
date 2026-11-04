@@ -130,7 +130,13 @@ function probeNativeLoadable() {
 }
 
 class Embedder {
-  constructor({ enabled = true, modelPath = null } = {}) {
+  constructor({ enabled = true, modelPath = null, threads, cpuOnly = false } = {}) {
+    if (threads !== undefined && (!Number.isInteger(Number(threads)) || Number(threads) < 1 || Number(threads) > 256)) {
+      throw new RangeError('embedding threads must be an integer in [1, 256]')
+    }
+    if (typeof cpuOnly !== 'boolean') throw new TypeError('cpuOnly must be boolean')
+    this.threads = threads === undefined ? undefined : Number(threads)
+    this.cpuOnly = cpuOnly
     this.enabled = enabled !== false
     this.explicitModelPath = modelPath
     this.state = this.enabled ? 'idle' : 'disabled' // idle|loading|ready|unavailable|disabled
@@ -187,10 +193,10 @@ class Embedder {
     try {
       // Optional dependency — absent on platforms without prebuilds.
       const { getLlama, LlamaLogLevel } = await import('node-llama-cpp')
-      const llama = await getLlama({ logLevel: LlamaLogLevel.error })
+      const llama = await getLlama({ logLevel: LlamaLogLevel.error, ...(this.cpuOnly ? { gpu: false } : {}) })
       const model = await llama.loadModel({ modelPath })
       this._model = model
-      this._ctx = await model.createEmbeddingContext()
+      this._ctx = await model.createEmbeddingContext(this.threads === undefined ? {} : { threads: this.threads })
       const probe = await this._ctx.getEmbeddingFor(this.profile.doc('none', 'probe'))
       this.dim = probe.vector.length
       this.modelPath = modelPath
@@ -255,7 +261,10 @@ class Embedder {
   }
 
   status() {
-    return { state: this.state, model: this.modelPath ? path.basename(this.modelPath) : null, dim: this.dim || null }
+    const runtime = this._ctx?._llamaContext
+    return { state: this.state, model: this.modelPath ? path.basename(this.modelPath) : null, dim: this.dim || null,
+      threads: runtime && !runtime.disposed ? runtime.currentThreads : (this.threads ?? null),
+      ...(this._model ? { backend: this._model.llama.gpu === false ? 'cpu' : String(this._model.llama.gpu) } : {}) }
   }
 
   // 图召回语义腿的原始余弦下限(跟随已加载模型的标定;server 每次召回读取)

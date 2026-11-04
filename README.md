@@ -80,8 +80,12 @@ This service omits standalone HTML graph export, RAGAS evaluation, Gemini embedd
 
 ## 设备待机
 
-支持 Device 的 `GET/POST /runtime/background`，POST 请求体为 `{"paused": true|false}`。暂停状态保存在数据目录的 `background-state.json`，重启后继续生效。先停止接收新的模型请求和记忆写入、暂停提交后续迁移批次，再等待已接受的提交及 OpenViking 全部队列完成，最后释放本地 BGE 上下文与模型。排空或恢复期间 `busy: true`；完成后 `busy: false`。已提交任务不会因待机取消，不会重放成功的迁移批次；失败批次仅按迁移重试额度补跑。
+支持 Device 的 `GET/POST /runtime/background`，POST 请求体为 `{"paused": true|false}`。暂停状态保存在数据目录的 `background-state.json`，重启后继续生效。先停止接收新的记忆操作、暂停提交后续迁移批次，再等待已接受的提交、原生记忆整理任务（`compile/memory`）及 OpenViking 全部队列完成，最后停用模型网关并释放本地 BGE 上下文与模型。排空期间已接受任务仍可继续调用模型。排空或恢复期间 `busy: true`；完成后 `busy: false`。已提交任务不会因待机取消，不会重放成功的迁移批次；失败批次仅按迁移重试额度补跑。
 
 待机时仍可浏览记忆、图谱、任务状态和健康接口；新检索、写入、整理等需要模型的请求返回 503 `background_paused`。唤醒重新加载本地 BGE，恢复迁移调度。外部 OpenViking 模式无法管理模型生命周期，控制接口明确返回 503。
 
 `.deb` 构建完成后必须通过解包运行检查：启动包内 CLI 与 Python 引擎，验证健康接口及正常退出，再用确定性模型替身验证迁移、记忆读写、检索、图谱、待机恢复和旧数据保留。只使用临时目录，不安装软件包、不运行维护脚本、不访问现有用户数据。
+
+升级设备时，两个服务共存：旧 mem 继续服务检索、写入和抽取，mem-ov 使用独立 socket `/run/violoop-mem-ov/violoop-mem-ov.sock`，回环调试端口为 `7701`，设备 unit 默认 CPU 4 线程。安装环境始终以仍在使用的 `/var/lib/violoop-mem/graph.db` 为只读迁移源；独立源码和测试目录不会自动读取设备旧库。
+
+迁移完成后继续检查旧库：新增事实自动补迁移；旧事实修改或删除时，仅重建尚未激活的原生暂存记忆，避免已删除的事实残留。`/v2/migration/status` 的 `readyForCutover` 只有在全部批次成功且源版本一致时为 true。Edge 等待旧请求结束，再以 `sourceRevision` 调用 `POST /v2/migration/activate`，服务持久化 `activatedAt` 后切换现有客户端。激活后不再跟随旧库变化，也不会因新服务临时不可用退回旧库。切换响应丢失时先确认持久化结果再放行写入，避免两个后端分叉。两个服务及旧数据均保留。
