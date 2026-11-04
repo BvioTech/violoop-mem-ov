@@ -697,7 +697,7 @@
         },
         {
           "path": "Cargo.lock",
-          "sha256": "7c76c7ba9e7f59b9854e30bb5d56ac8964b88a073452524aa188f83cb836ff2f",
+          "sha256": "a9a571f9567ceaee7afab2242dd8b2a7ee00a0283b1521189abe9d9449032792",
           "destination": "engine/Cargo.lock",
           "integration_sha256": "7c76c7ba9e7f59b9854e30bb5d56ac8964b88a073452524aa188f83cb836ff2f"
         },
@@ -4081,7 +4081,7 @@
           "path": "crates/ov_cli/Cargo.toml",
           "sha256": "dac172bd46a1ee16d0a9d34c43c4d9b5437b60ed4ac8ad5eb105e2b331688ff4",
           "destination": "engine/crates/ov_cli/Cargo.toml",
-          "integration_sha256": "803b75bae41c7a365bc4c52e1d4abced3330727ee729c7d3e64b39480c76603d"
+          "integration_sha256": "007967a83a85549e41601726ce379b27df42bed2c913edf54bc195864102750e"
         },
         {
           "path": "crates/ov_cli/README.md",
@@ -4361,8 +4361,9 @@
         },
         {
           "path": "crates/ragfs-python/Cargo.toml",
-          "sha256": "2f296bba3daff9b322a334366a16b75d85cee729ffc57626f62c2a9e07688cde",
-          "destination": "engine/crates/ragfs-python/Cargo.toml"
+          "sha256": "0814723df7c21a970aad1352b5aeb36bbb647c98aa4bc35c6aeb70a20249e483",
+          "destination": "engine/crates/ragfs-python/Cargo.toml",
+          "integration_sha256": "141028ddb5a609e4615a9580dbd50b815ccb459fcf82efdeb50e5dd4d7ef6d4f"
         },
         {
           "path": "crates/ragfs-python/pyproject.toml",
@@ -4371,18 +4372,21 @@
         },
         {
           "path": "crates/ragfs-python/src/git.rs",
-          "sha256": "da25bef4931257406d8bccbe25f8e81c559565a14213f5f3c774eb1311575761",
-          "destination": "engine/crates/ragfs-python/src/git.rs"
+          "sha256": "7942a6958f1f5ba4dad3b0f11df3a43bf452074130134c7357145a27eb89073a",
+          "destination": "engine/crates/ragfs-python/src/git.rs",
+          "integration_sha256": "da25bef4931257406d8bccbe25f8e81c559565a14213f5f3c774eb1311575761"
         },
         {
           "path": "crates/ragfs-python/src/lib.rs",
-          "sha256": "a90922e269dbb18448515fc194dac04e391385f2993a76f949c56c1c3b5b20a6",
-          "destination": "engine/crates/ragfs-python/src/lib.rs"
+          "sha256": "fa784a163252a14b3ab0effac3ed9601bceea5b768f32786d2175eda2949c920",
+          "destination": "engine/crates/ragfs-python/src/lib.rs",
+          "integration_sha256": "a90922e269dbb18448515fc194dac04e391385f2993a76f949c56c1c3b5b20a6"
         },
         {
           "path": "crates/ragfs/Cargo.toml",
-          "sha256": "ff095a5a8e7b9186cc540d7f1648c35856a22cbf0cbdb34c476f9b53e3b9dbd1",
-          "destination": "engine/crates/ragfs/Cargo.toml"
+          "sha256": "573c25fb727425678a24b3d8b245e96bc6c59c7a6d6b924d886173868e51a8f0",
+          "destination": "engine/crates/ragfs/Cargo.toml",
+          "integration_sha256": "22c1c5724a499153c68381ac6eff2012d28bbab9d6635bb7fcb886bba5151327"
         },
         {
           "path": "crates/ragfs/ORIGIN.md",
@@ -27250,7 +27254,7 @@
         },
         {
           "path": "uv.lock",
-          "sha256": "f06cb7ce573da0207e59ad98c24a7fa72abc86b8191ed9d5ded023f0cc7cf48d",
+          "sha256": "e9a11247250cbd291bb55345ebffd24d3049155cfc4c43041ebab73243da03ea",
           "destination": "engine/uv.lock",
           "integration_sha256": "f06cb7ce573da0207e59ad98c24a7fa72abc86b8191ed9d5ded023f0cc7cf48d"
         },

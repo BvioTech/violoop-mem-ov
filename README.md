@@ -13,7 +13,7 @@
 
 ## 安装
 
-需要 Node.js 24、uv、C/C++ 编译工具（macOS Xcode Command Line Tools；Linux 的编译器和开发头文件）。Rust 可以使用本机版本（>=1.91.1），或仅安装到本目录的忽略目录：
+需要 Node.js 24、uv、C/C++ 编译工具（macOS Xcode Command Line Tools；Linux 的编译器和开发头文件）。Rust 可以使用本机版本（>=1.94.1），或仅安装到本目录的忽略目录：
 
 ```sh
 npm run setup -- --bootstrap-rust
