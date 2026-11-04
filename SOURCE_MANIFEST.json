@@ -9,7 +9,7 @@
           "path": "config.js",
           "sha256": "6cea5346c29fc6f68ac0ce90f1cf1a288540353d133fb8dcd2c2f0752a352552",
           "destination": "service/config.js",
-          "integration_sha256": "4901c97c9074020004e7e224679e0716cb6a36b08e97be06cbe2f016705f39b1"
+          "integration_sha256": "5808eaea0f6e13ea9dff531fd2327bde6995df11c02643ad0ee224de6801b8d7"
         },
         {
           "path": "deploy/openviking-adapter.yaml",
@@ -32,7 +32,7 @@
           "path": "deploy/violoop-mem-ov.service",
           "sha256": "5f64157082c4e9a05b2aa51019b951cbf62b4c053a00459480bd0d36efb0632a",
           "destination": "deploy/violoop-mem-ov.service",
-          "integration_sha256": "d23431181a2a3849dc7b2ab980799a61f399e1fcfae2da65d0531bce9119f1f2"
+          "integration_sha256": "e63f87bdeaf8369726fdbbddb6f14c5361f56da10b2caf72953971a8ff6cef9e"
         },
         {
           "path": "docs/agent-memory.md",
@@ -60,7 +60,7 @@
           "path": "embedder.js",
           "sha256": "eccfd770d1f88ac7076045fe0fb9d8473d6c087f29d3a970932848979846313f",
           "destination": "service/embedder.js",
-          "integration_sha256": "97b006f4a61b390a0f1672e477044e7ae5b9c0e0280bf18a38fa90449b7e2848"
+          "integration_sha256": "1db89db6679051b66b964b5b5fa1d70ca2912b8a30fd1858c79983ebb5b4d099"
         },
         {
           "path": "event_time_decay.js",

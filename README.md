@@ -85,3 +85,5 @@ This service omits standalone HTML graph export, RAGAS evaluation, Gemini embedd
 待机时仍可浏览记忆、图谱、任务状态和健康接口；新检索、写入、整理等需要模型的请求返回 503 `background_paused`。唤醒重新加载本地 BGE，恢复迁移调度。外部 OpenViking 模式无法管理模型生命周期，控制接口明确返回 503。
 
 `.deb` 构建完成后必须通过解包运行检查：启动包内 CLI 与 Python 引擎，验证健康接口及正常退出，再用确定性模型替身验证迁移、记忆读写、检索、图谱、待机恢复和旧数据保留。只使用临时目录，不安装软件包、不运行维护脚本、不访问现有用户数据。
+
+升级设备时，新服务使用 `/run/violoop-mem-ov/violoop-mem-ov.sock`，回环调试端口为 `7701`，与旧服务的 `7700` 分开。设备 unit 默认使用 CPU 4 线程。新数据目录没有 `graph.db` 时，会只读迁移 `/var/lib/violoop-mem/graph.db`；独立源码和测试目录不会自动读取设备旧库。
