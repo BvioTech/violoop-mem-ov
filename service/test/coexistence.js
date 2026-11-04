@@ -3,9 +3,12 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const http = require('node:http')
+const {once} = require('node:events')
 const Database = require('better-sqlite3')
 const {linkedLegacyDatabase} = require('./fixtures/legacy')
 const {LegacyMigration} = require('../legacy_migration')
+const {createApp} = require('../openviking_adapter')
 const {readLegacySnapshot, legacyFacts} = require('../legacy_source')
 
 async function fixture(t) {
@@ -74,6 +77,34 @@ test('access/embedding bookkeeping does not invalidate the source revision', asy
   f.edit("UPDATE memories SET updated_at='2026-11-04'; UPDATE entities SET last_accessed_at='2026-11-04', dirty=0")
   assert.deepEqual(legacyFacts(readLegacySnapshot(f.sourceFile)), before)
   assert.equal(f.service.status().readyForCutover, true)
+})
+test('coexistence fences every native write route until migration is activated; non-coexistence installs are unaffected', async t => {
+  async function boot(coexistence) {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-fence-'))
+    const client = {scope: 'fence', user: 'test', writeMemory: async () => ({vector_status: 'queued'})}
+    const app = createApp(client, {dataDir, coexistence})
+    const server = http.createServer(app)
+    server.listen(0, '127.0.0.1'); await once(server, 'listening')
+    t.after(async () => { server.close(); await app.close(); fs.rmSync(dataDir, {recursive: true, force: true}) })
+    const base = 'http://127.0.0.1:' + server.address().port
+    const call = (method, route, body) => fetch(base + route, {method,
+      headers: {'content-type': 'application/json'}, ...(body === undefined ? {} : {body: JSON.stringify(body)})})
+    return {call}
+  }
+  const fenced = await boot(true)
+  for (const [method, route, body] of [
+    ['POST', '/v1/memory-entries', {memoryType: 'profile', content: 'hello'}],
+    ['POST', '/v1/memories', {key: 'viking://user/test/memories/profile.md', content: 'hello'}],
+    ['POST', '/v2/ingest', {episode: {messages: [{role: 'user', content: 'hi'}]}}],
+  ]) {
+    const res = await fenced.call(method, route, body)
+    assert.equal(res.status, 409)
+    assert.equal((await res.json()).error.code, 'migration_pending')
+  }
+  assert.equal((await fenced.call('GET', '/v2/migration/status')).status, 200, 'reads are never fenced')
+  const plain = await boot(false)
+  const created = await plain.call('POST', '/v1/memory-entries', {memoryType: 'profile', content: 'hello'})
+  assert.equal(created.status, 201, 'non-coexistence installs accept native writes immediately')
 })
 test('a rebuild failure leaves legacy authoritative and can resume after a restart', async t => {
   const f = await fixture(t)

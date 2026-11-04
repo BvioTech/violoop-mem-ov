@@ -344,6 +344,9 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
   const nativeMutate = createMutations(client, () => entries.invalidate())
   const manual = require('./openviking_manual')
   const mutate = async (...args) => {
+    if (migration.blocksNativeWrites()) {
+      throw fail('migration_pending', 'Native memory is not authoritative until legacy migration is activated', 409)
+    }
     const result = await nativeMutate(...args)
     // These API writes have already persisted the file when they return.
     // Indexing stays separate from the native vector-processing task.
@@ -583,7 +586,12 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
       if (req.method === 'POST' && p === '/v1/grep') return json(res, 200, await grepMemory(await readJson(req)))
       if (req.method === 'POST' && ['/v1/search', '/v2/search', '/v2/recall', '/v2/ingest'].includes(p)) {
         const body = await readJson(req)
-        if (p === '/v2/ingest') return json(res, 202, await journal.ingest(body))
+        if (p === '/v2/ingest') {
+          if (migration.blocksNativeWrites()) {
+            throw fail('migration_pending', 'Native memory is not authoritative until legacy migration is activated', 409)
+          }
+          return json(res, 202, await journal.ingest(body))
+        }
         if (p === '/v2/recall') {
           const text = query(body.text, 'text').slice(0, 600)
           const maxEntities = integer(body.maxEntities, 10)

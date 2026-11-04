@@ -186,6 +186,11 @@ class LegacyMigration {
     return b ? { message: `Migration batch ${b.id} skipped (${b.status}): ${b.error || b.status}`,
       at: b.issueRecordedAt || null } : null
   }
+  // While coexistence is active and unactivated, resetMigrationMemory() may
+  // wipe the whole native memory tree to rebuild migration staging. Any
+  // other native write landing in that window would be destroyed by the
+  // next reset, so no native write may be accepted until activation.
+  blocksNativeWrites() { return this.coexistence && !this.state?.activatedAt }
   status() {
     if (this.loadError) throw this.loadError
     let pendingCount
@@ -233,7 +238,7 @@ class LegacyMigration {
     // Edge holds its routing fence while this synchronous source check and
     // durable commit run. No legacy writes can cross the handoff boundary.
     const status = this.status()
-    if (!status.readyForCutover || sourceRevision !== status.sourceRevision) {
+    if (!status.readyForCutover || (sourceRevision ?? null) !== status.sourceRevision) {
       throw Object.assign(new Error('Legacy migration has not caught up'), { status: 409 })
     }
     if (!this.state) throw Object.assign(new Error('Migration has not initialized'), { status: 409 })
