@@ -1,6 +1,7 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
 const http = require('http')
+const net = require('net')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -153,6 +154,57 @@ test('native config preserves workspace ownership and bounded workers', () => {
   assert.equal(conf.memory.custom_templates_dir, '/run/violoop-mem-ov/memory-templates')
   assert.equal(conf.queue_workers.session_commit.max_concurrent, 1)
 })
+
+for (const cleanupFails of [false, true]) {
+  test(`shutdown drains both listeners with unfinished requests${cleanupFails ? ' even if cleanup fails' : ''}`, { timeout: 8000 }, async t => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vm-stop-connections-')))
+    const probe = http.createServer(); await listen(probe)
+    const port = probe.address().port; await close(probe)
+    const socket = process.platform === 'win32' ? `\\\\.\\pipe\\memov-stop-${process.pid}-${Date.now()}` : path.join(root, 'mem.sock')
+    const adapter = require('../openviking_adapter')
+    const createApp = adapter.createApp
+    const cleanupError = new Error('fixture cleanup failed')
+    if (cleanupFails) adapter.createApp = (...args) => {
+      const app = createApp(...args), closeApp = app.close
+      app.close = async () => { await closeApp(); throw cleanupError }
+      return app
+    }
+    let service
+    try {
+      service = await require('../server').start({
+        backend: 'openviking', dataDir: root, socket, httpPort: port, httpHost: '127.0.0.1',
+        openviking: { mode: 'external', url: 'http://127.0.0.1:1' },
+      })
+    } finally { adapter.createApp = createApp }
+    const clients = []
+    let closedCount = 0
+    const servers = [service.socketServer, service.httpServer]
+    const closed = Promise.all(servers.map(server => once(server, 'close').then(() => { closedCount++ })))
+    t.after(async () => {
+      for (const client of clients) client.destroy()
+      for (const server of servers) server.closeAllConnections()
+      await service.shutdown().catch(() => {})
+      await closed
+      fs.rmSync(root, { recursive: true, force: true })
+    })
+    for (const [index, address] of [socket, { host: '127.0.0.1', port }].entries()) {
+      const requested = once(servers[index], 'request')
+      const client = net.createConnection(address)
+      clients.push(client)
+      client.on('error', () => {}) // Forced closure may reset the unfinished request.
+      await once(client, 'connect')
+      client.write('POST /v1/grep HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{"query":"')
+      await requested
+    }
+    const started = Date.now()
+    const shutdown = service.shutdown()
+    assert.equal(service.shutdown(), shutdown, 'repeated shutdown reuses the pending drain')
+    if (cleanupFails) await assert.rejects(shutdown, error => error === cleanupError)
+    else await shutdown
+    assert.equal(closedCount, 2, 'shutdown must wait for both server close callbacks')
+    assert.ok(Date.now() - started < 5000, 'held requests are force-closed within the shutdown grace period')
+  })
+}
 
 test('repeated shutdown signals wait for native cleanup instead of abandoning the child',
   { skip: process.platform === 'win32' }, async t => {

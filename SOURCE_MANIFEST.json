@@ -243,7 +243,7 @@
           "path": "server.js",
           "sha256": "8d2ce671d5a6074ee28b9e7509092771dbf70b3ec2fbb3a7937d465667941d2a",
           "destination": "service/server.js",
-          "integration_sha256": "4fc1d5e79be1e188bbc4509b2c4967cd727374b0c50682b135fcf8f4b9b3afed"
+          "integration_sha256": "9a7b6af5f203f932484b3ac6a93bf5338bf77ab431d32b9a077840352cb289f9"
         },
         {
           "path": "test/agent_memory.js",
@@ -265,7 +265,7 @@
           "path": "test/managed.js",
           "sha256": "84ac57b635c32f44078d8e338e40f4d143c45e7211ab03079f89f48749346ba0",
           "destination": "service/test/managed.js",
-          "integration_sha256": "91c7e9ce8e66c55cdf91e14ccb43cf47a1ee95d069b90d386fd97352bcd24d88"
+          "integration_sha256": "863388fe3ec04b6f3f329ba6520f00ea003edbeae0fa423329a3fbea55a85def"
         },
         {
           "path": "test/migration_embedding.js",
