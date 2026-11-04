@@ -17,6 +17,29 @@ env:
   NPM_CONFIG_FETCH_RETRIES: "5"
 
 jobs:
+  native-build-commands:
+    name: Build commands (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Test native build command configuration
+        run: python -m unittest discover -s tests -p test_script_commands.py -v
+
   service:
     name: Service regression tests
     runs-on: ubuntu-24.04
