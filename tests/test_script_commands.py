@@ -42,7 +42,7 @@ class ScriptCommandTests(unittest.TestCase):
     @unittest.skipUnless(os.name == 'nt', 'Windows PATHEXT integration')
     def test_windows_runs_a_cmd_shim_from_a_path_with_spaces(self):
         with tempfile.TemporaryDirectory(prefix='build tools ') as directory:
-            Path(directory, 'build-shim.cmd').write_text('@echo off\r\necho %~1\r\n')
+            Path(directory, 'build-shim.cmd').write_bytes(b'@echo off\r\necho %~1\r\n')
             env = dict(os.environ, PATH=directory + os.pathsep + os.environ.get('PATH', ''))
             result = common.run('build-shim', 'argument with spaces', env=env, capture_output=True, text=True)
             self.assertEqual(result.stdout.strip(), 'argument with spaces')
