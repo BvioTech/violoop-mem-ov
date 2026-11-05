@@ -124,6 +124,7 @@ async function startRuntime(config, { spawnProcess = spawn, embedder = new Embed
   if (embedder.ensureLoaded) void embedder.ensureLoaded()
   return {
     engineKey, embedder,
+    createEmbeddingApi: run => require('./embedding_api').createEmbeddingApi({ embedder, gatewayUrl: gateway.url, token, run }),
     async suspend() {
       gateway.setPaused(true)
       await gateway.drain()
