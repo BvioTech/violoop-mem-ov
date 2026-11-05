@@ -36,7 +36,7 @@ QMD_MODELS_DIR=/absolute/path/to/bge-model-directory \
 npm start -- --data-dir "$PWD/.local/data" --socket "$PWD/.local/mem.sock"
 ```
 
-模型目录需含 `bge-m3-q8_0.gguf`；也可用 `--embedding-model /path/to/model.gguf`。模型不随 Git 导入。正式模型调用仍使用 Device 的 `/internal/memory/chat/completions`（默认 `127.0.0.1:9090`），可通过 `OPENVIKING_DEVICE_MODEL_URL` 指定另一个本机 Device 地址。独立测试入口会提供本地确定性模型响应，无需连接真实 Device 或云服务。
+模型目录需含 `bge-m3-q8_0.gguf`；源码运行也会查找本仓库的 `models/`，无需为该目录设置环境变量。也可用 `--embedding-model /path/to/model.gguf`。模型不随 Git 导入。正式模型调用仍使用 Device 的 `/internal/memory/chat/completions`（默认 `127.0.0.1:9090`），可通过 `OPENVIKING_DEVICE_MODEL_URL` 指定另一个本机 Device 地址。独立测试入口会提供本地确定性模型响应，无需连接真实 Device 或云服务。
 
 普通向量请求保持本地 BGE；迁移向量请求经 Device 的 `/internal/memory/embeddings`，使用当前登录用户自动领取、续期的模型网关凭证调用云端 `bge-m3`。无需单独配置迁移 URL 或密钥文件。
 
@@ -64,7 +64,7 @@ GitHub Actions 在 main 的 push/PR 和手动触发时运行服务回归、原�
 
 发布前，在本仓库 Actions Secrets 配置 `APT_WEBHOOK_SECRET`，与 APT 服务的 `WEBHOOK_SECRET` 一致。APT 服务白名单须包含 `BvioTech/violoop-mem-ov` 发布的 `violoop-mem-ov_*_arm64.deb`，并给服务端 GitHub token 本仓库读取权限。
 
-Release 发布后，独立的 APT 通知任务使用真实仓库名和 tag 向现有 webhook 发送 HMAC-SHA256 签名通知；缺少密钥或响应不是 202 会使该任务失败，可在配置修正后仅重跑失败任务，无需覆盖 Release。202 只代表后台同步已入队，仍需检查 APT 索引确认版本可见。模型包独立发布，不随服务 CI 重打；APT 源须已有 `violoop-mem-ov-model >= 1.0.0`。
+Release 发布后，独立的 APT 通知任务使用真实仓库名和 tag 向现有 webhook 发送 HMAC-SHA256 签名通知；缺少密钥或响应不是 202 会使该任务失败，可在配置修正后仅重跑失败任务，无需覆盖 Release。202 只代表后台同步已入队，仍需检查 APT 索引确认版本可见。模型包独立发布，不随本仓库 CI 构建（见 `violoop-mem` 仓库）；APT 源须已有 `violoop-mem-model >= 1.0.0`。
 
 ## 旧记忆保护
 
@@ -80,8 +80,12 @@ This service omits standalone HTML graph export, RAGAS evaluation, Gemini embedd
 
 ## 设备待机
 
-支持 Device 的 `GET/POST /runtime/background`，POST 请求体为 `{"paused": true|false}`。暂停状态保存在数据目录的 `background-state.json`，重启后继续生效。先停止接收新的模型请求和记忆写入、暂停提交后续迁移批次，再等待已接受的提交及 OpenViking 全部队列完成，最后释放本地 BGE 上下文与模型。排空或恢复期间 `busy: true`；完成后 `busy: false`。已提交任务不会因待机取消，不会重放成功的迁移批次；失败批次仅按迁移重试额度补跑。
+支持 Device 的 `GET/POST /runtime/background`，POST 请求体为 `{"paused": true|false}`。暂停状态保存在数据目录的 `background-state.json`，重启后继续生效。先停止接收新的记忆操作、暂停提交后续迁移批次，再等待已接受的提交、原生记忆整理任务（`compile/memory`）及 OpenViking 全部队列完成，最后停用模型网关并释放本地 BGE 上下文与模型。排空期间已接受任务仍可继续调用模型。排空或恢复期间 `busy: true`；完成后 `busy: false`。已提交任务不会因待机取消，不会重放成功的迁移批次；失败批次仅按迁移重试额度补跑。
 
 待机时仍可浏览记忆、图谱、任务状态和健康接口；新检索、写入、整理等需要模型的请求返回 503 `background_paused`。唤醒重新加载本地 BGE，恢复迁移调度。外部 OpenViking 模式无法管理模型生命周期，控制接口明确返回 503。
 
 `.deb` 构建完成后必须通过解包运行检查：启动包内 CLI 与 Python 引擎，验证健康接口及正常退出，再用确定性模型替身验证迁移、记忆读写、检索、图谱、待机恢复和旧数据保留。只使用临时目录，不安装软件包、不运行维护脚本、不访问现有用户数据。
+
+升级设备时，两个服务共存：旧 mem 继续服务检索、写入和抽取，mem-ov 使用独立 socket `/run/violoop-mem-ov/violoop-mem-ov.sock`，回环调试端口为 `7701`，设备 unit 默认 CPU 4 线程。安装环境始终以仍在使用的 `/var/lib/violoop-mem/graph.db` 为只读迁移源；独立源码和测试目录不会自动读取设备旧库。
+
+迁移完成后继续检查旧库：新增事实自动补迁移；旧事实修改或删除时，仅重建尚未激活的原生暂存记忆，避免已删除的事实残留。`/v2/migration/status` 的 `readyForCutover` 只有在全部批次成功且源版本一致时为 true。Edge 等待旧请求结束，再以 `sourceRevision` 调用 `POST /v2/migration/activate`，服务持久化 `activatedAt` 后切换现有客户端。激活后不再跟随旧库变化，也不会因新服务临时不可用退回旧库。切换响应丢失时先确认持久化结果再放行写入，避免两个后端分叉。两个服务及旧数据均保留。

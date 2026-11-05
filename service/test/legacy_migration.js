@@ -539,8 +539,37 @@ test('missing task with no archive is a durable failure and duplicate status che
   const journal = new IngestJournal(client, dir)
   await journal.ingest(body)
   assert.equal((await journal.lookup(body)).status, 'failed')
-  assert.equal((await new IngestJournal(client, dir).lookup(body)).status, 'failed')
+  assert.equal((await journal.lookup(body)).retryable, false)
+  const reopened = new IngestJournal(client, dir)
+  assert.equal((await reopened.lookup(body)).status, 'failed')
+  // Receipts persisted by the initial release lacked the unconfirmed flag.
+  const record = reopened.read((await reopened.lookup(body)).ingestId)
+  delete record.terminal.retryable; delete record.terminal.task.unconfirmed
+  reopened.save(record)
+  assert.equal((await reopened.lookup(body)).retryable, false)
   assert.equal(writes, 1); assert.equal(commits, 1); assert.equal(polls, 1)
+})
+
+test('blocksNativeWrites fences only the coexistence window before activation', t => {
+  const dir = root(t)
+  const client = { scope: 'scope' }
+  const plain = new LegacyMigration({ dataDir: dir, client, journal: {}, autoResume: false })
+  assert.equal(plain.blocksNativeWrites(), false, 'non-coexistence deployments never fence native writes')
+  plain.stop()
+  const coexisting = new LegacyMigration({ dataDir: path.join(dir, 'c'), client, journal: {}, coexistence: true, autoResume: false })
+  assert.equal(coexisting.blocksNativeWrites(), true, 'unstarted coexistence migration still owns the native tree')
+  coexisting.state = { activatedAt: Date.now() }
+  assert.equal(coexisting.blocksNativeWrites(), false, 'activation hands the native tree over for good')
+  coexisting.stop()
+})
+
+test('activating a non-coexistence, completed migration accepts an omitted sourceRevision', async t => {
+  const f = retryFixture(t, () => 'completed')
+  await f.svc.run(); await waitFor(() => !f.svc.state.started)
+  assert.equal(f.svc.status().readyForCutover, true)
+  assert.equal(f.svc.status().sourceRevision, null)
+  const activated = await f.svc.activate()
+  assert.equal(activated.activated, true)
 })
 
 test('lost commit responses retry in fresh sessions and can succeed without rewriting completed batches', async t => {

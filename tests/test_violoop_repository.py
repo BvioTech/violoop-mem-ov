@@ -58,6 +58,45 @@ def test_source_startup_resolves_own_engine_and_python():
     assert Path(config['openviking']['pythonPath']).resolve() == ROOT / 'engine'
     assert Path(config['openviking']['python']).parent.parent == ROOT / '.venv'
 
+def test_httpx_supports_inherited_socks_proxy_and_bypasses_it_for_loopback(monkeypatch):
+    import asyncio
+    import httpx
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    for key in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv('ALL_PROXY', 'socks5://127.0.0.1:1')
+    monkeypatch.setenv('NO_PROXY', '127.0.0.1,localhost')
+    monkeypatch.setenv('no_proxy', '127.0.0.1,localhost')
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'local model gateway')
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f'http://127.0.0.1:{server.server_port}/'
+    try:
+        with httpx.Client(timeout=2) as client:
+            assert client.get(url).text == 'local model gateway'
+
+        async def check_async():
+            async with httpx.AsyncClient(timeout=2) as client:
+                assert (await client.get(url)).text == 'local model gateway'
+
+        asyncio.run(check_async())
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
 def test_package_removal_never_deletes_memory_state():
     postrm = (ROOT / 'scripts/deb/postrm.sh').read_text()
     assert 'rm -rf /var/lib' not in postrm

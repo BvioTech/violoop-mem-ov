@@ -1,15 +1,46 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
 const http = require('http')
+const net = require('net')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { EventEmitter } = require('events')
+const { spawn } = require('child_process')
+const { once } = require('events')
 const { startModelGateway } = require('../model_gateway')
 const { startRuntime, nativeConfig } = require('../openviking_runtime')
 
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const close = server => new Promise(resolve => { server.closeAllConnections(); server.close(resolve) })
+
+test('source and relocated runtimes discover adjacent models while preserving explicit and environment overrides', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vm-model-path-')))
+  const previous = process.env.QMD_MODELS_DIR
+  t.after(() => {
+    if (previous === undefined) delete process.env.QMD_MODELS_DIR
+    else process.env.QMD_MODELS_DIR = previous
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+  fs.mkdirSync(path.join(root, 'service'))
+  fs.copyFileSync(path.join(__dirname, '../embedder.js'), path.join(root, 'service/embedder.js'))
+  const { Embedder } = require(path.join(root, 'service/embedder.js'))
+  const local = path.join(root, 'models/bge-m3-q8_0.gguf')
+  const envModel = path.join(root, 'override/bge-m3-q8_0.gguf')
+  const explicit = path.join(root, 'explicit.gguf')
+  for (const file of [local, envModel, explicit]) {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, 'model fixture')
+  }
+  delete process.env.QMD_MODELS_DIR
+  assert.equal(new Embedder().resolveModelPath(), local)
+  process.env.QMD_MODELS_DIR = path.join(root, 'missing')
+  assert.equal(new Embedder().resolveModelPath(), local)
+  process.env.QMD_MODELS_DIR = path.dirname(envModel)
+  assert.equal(new Embedder().resolveModelPath(), envModel)
+  assert.equal(new Embedder({ modelPath: explicit }).resolveModelPath(), explicit)
+})
+
 test('BGE bridge returns real float vectors, serializes requests and rejects bad auth/model/dimension', async t => {
   let active = 0; let peak = 0
   const embedder = { async embedQuery(text) {
@@ -124,6 +155,99 @@ test('native config preserves workspace ownership and bounded workers', () => {
   assert.equal(conf.queue_workers.session_commit.max_concurrent, 1)
 })
 
+for (const cleanupFails of [false, true]) {
+  test(`shutdown drains both listeners with unfinished requests${cleanupFails ? ' even if cleanup fails' : ''}`, { timeout: 8000 }, async t => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vm-stop-connections-')))
+    const probe = http.createServer(); await listen(probe)
+    const port = probe.address().port; await close(probe)
+    const socket = process.platform === 'win32' ? `\\\\.\\pipe\\memov-stop-${process.pid}-${Date.now()}` : path.join(root, 'mem.sock')
+    const adapter = require('../openviking_adapter')
+    const createApp = adapter.createApp
+    const cleanupError = new Error('fixture cleanup failed')
+    if (cleanupFails) adapter.createApp = (...args) => {
+      const app = createApp(...args), closeApp = app.close
+      app.close = async () => { await closeApp(); throw cleanupError }
+      return app
+    }
+    let service
+    try {
+      service = await require('../server').start({
+        backend: 'openviking', dataDir: root, socket, httpPort: port, httpHost: '127.0.0.1',
+        openviking: { mode: 'external', url: 'http://127.0.0.1:1' },
+      })
+    } finally { adapter.createApp = createApp }
+    const clients = []
+    let closedCount = 0
+    const servers = [service.socketServer, service.httpServer]
+    const closed = Promise.all(servers.map(server => once(server, 'close').then(() => { closedCount++ })))
+    t.after(async () => {
+      for (const client of clients) client.destroy()
+      for (const server of servers) server.closeAllConnections()
+      await service.shutdown().catch(() => {})
+      await closed
+      fs.rmSync(root, { recursive: true, force: true })
+    })
+    for (const [index, address] of [socket, { host: '127.0.0.1', port }].entries()) {
+      const requested = once(servers[index], 'request')
+      const client = net.createConnection(address)
+      clients.push(client)
+      client.on('error', () => {}) // Forced closure may reset the unfinished request.
+      await once(client, 'connect')
+      client.write('POST /v1/grep HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{"query":"')
+      await requested
+    }
+    const started = Date.now()
+    const shutdown = service.shutdown()
+    assert.equal(service.shutdown(), shutdown, 'repeated shutdown reuses the pending drain')
+    if (cleanupFails) await assert.rejects(shutdown, error => error === cleanupError)
+    else await shutdown
+    assert.equal(closedCount, 2, 'shutdown must wait for both server close callbacks')
+    assert.ok(Date.now() - started < 5000, 'held requests are force-closed within the shutdown grace period')
+  })
+}
+
+test('repeated shutdown signals wait for native cleanup instead of abandoning the child',
+  { skip: process.platform === 'win32' }, async t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vm-stop-signals-')))
+  const marker = path.join(root, 'native-stopped')
+  const probe = http.createServer(); await listen(probe)
+  const port = probe.address().port; await close(probe)
+  const source = `
+    const fs=require('fs'),path=require('path'),{EventEmitter}=require('events');
+    const {start}=require(${JSON.stringify(path.resolve(__dirname, '../server'))});
+    const {loadConfig}=require(${JSON.stringify(path.resolve(__dirname, '../config'))});
+    (async()=>{
+      const config=loadConfig(['--socket',${JSON.stringify(path.join(root, 'mem.sock'))},'--data-dir',${JSON.stringify(root)}],{
+        OPENVIKING_URL:'http://127.0.0.1:${port}',OPENVIKING_RUNTIME_DIR:${JSON.stringify(path.join(root, 'run'))}
+      });
+      const service=await start(config,{runtimeOptions:{embedder:{status:()=>({state:'ready',dim:1024})},spawnProcess:()=>{
+        const child=new EventEmitter();child.pid=1234;child.kill=()=>{child.emit('exit',0,null);return true};return child;
+      }}});
+      const stop=service.runtime.stop;
+      service.runtime.stop=async()=>{process.stdout.write('stopping\\n');await new Promise(r=>setTimeout(r,200));await stop();fs.writeFileSync(${JSON.stringify(marker)},'done');};
+      process.stdout.write('ready\\n');
+    })().catch(e=>{console.error(e);process.exitCode=1});
+  `
+  const child = spawn(process.execPath, ['-e', source], { stdio: ['ignore', 'pipe', 'pipe'] })
+  t.after(() => { if (child.exitCode === null && !child.signalCode) child.kill('SIGKILL'); fs.rmSync(root, { recursive: true, force: true }) })
+  const exited = once(child, 'exit')
+  let output = ''; let stderr = ''
+  child.stdout.on('data', data => { output += data }); child.stderr.on('data', data => { stderr += data })
+  const untilOutput = async text => {
+    const deadline = Date.now() + 5000
+    while (!output.includes(text) && child.exitCode === null && !child.signalCode && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    assert.ok(output.includes(text), output + stderr)
+  }
+  await untilOutput('ready\n')
+  child.kill('SIGTERM')
+  await untilOutput('stopping\n')
+  child.kill('SIGINT')
+  assert.deepEqual(await exited, [0, null], stderr)
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'done')
+})
+
 test('only the native migration system instruction enables the migration model route', async t => {
   const requests = []
   const upstream = http.createServer(async (req, res) => {
@@ -141,4 +265,22 @@ test('only the native migration system instruction enables the migration model r
   }
   assert.equal(requests[0].violoop_legacy_migration, undefined)
   assert.equal(requests[1].violoop_legacy_migration, true)
+})
+
+test('portable simulator config resolves a relocated interpreter and engine before source or system paths', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ov-portable-')))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const mem = path.join(root, 'mem')
+  const python = path.join(root, 'runtime/python', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
+  for (const file of [python, path.join(mem, 'service/config.js'), path.join(mem, 'openviking-python/openviking/server/bootstrap.py')]) {
+    fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, '')
+  }
+  fs.copyFileSync(path.join(__dirname, '../config.js'), path.join(mem, 'service/config.js'))
+  const { loadConfig } = require(path.join(mem, 'service/config.js'))
+  const config = loadConfig([], {})
+  assert.equal(config.openviking.python, python)
+  assert.equal(config.openviking.pythonPath, path.join(mem, 'openviking-python'))
+  const explicit = loadConfig([], { OPENVIKING_PYTHON: 'explicit-python', OPENVIKING_PYTHONPATH: 'explicit-engine' })
+  assert.equal(explicit.openviking.python, 'explicit-python')
+  assert.equal(explicit.openviking.pythonPath, 'explicit-engine')
 })

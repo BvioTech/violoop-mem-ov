@@ -102,3 +102,37 @@ test('migration standby does not change batch identities, retry counters or subm
   m.setPaused(false); m.stop()
   assert.equal(JSON.stringify(m.state), before)
 })
+
+test('native consolidation drains before suspension, and shutdown can interrupt the wait without cancelling work', async t => {
+  const { createApp } = require('../openviking_adapter')
+  const { Readable } = require('stream')
+  for (const stopDuringDrain of [false, true]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-compile-drain-'))
+    let taskState = 'running', suspended = false
+    const client = { user: 'test', scope: 'drain', ready: async () => true,
+      consolidateMemories: async () => ({ task_id: 'compile' }),
+      task: async () => ({ status: taskState, result: {} }),
+      listFiles: async () => ({ result: [], has_more: false }),
+      waitProcessed: async () => { assert.equal(taskState, 'completed') } }
+    const app = createApp(client, { dataDir: dir })
+    const control = new BackgroundControl({ dataDir: dir, app, client, retryMs: 1,
+      runtime: { suspend: async () => { suspended = true }, resume: async () => {} } })
+    try {
+      const req = Readable.from([]); req.method = 'POST'; req.url = '/v2/memory/consolidation/start'
+      const res = { writeHead() {}, end(body) { assert.equal(JSON.parse(body).started, true) } }
+      await app(req, res)
+      control.setPaused(true)
+      await new Promise(resolve => setTimeout(resolve, 50))
+      assert.equal(control.status().busy, true)
+      assert.equal(suspended, false)
+      if (stopDuringDrain) {
+        await control.stop()
+        assert.equal(taskState, 'running'); assert.equal(suspended, false)
+      } else {
+        taskState = 'completed'
+        await until(() => !control.status().busy)
+        assert.equal(suspended, true)
+      }
+    } finally { await control.stop(); await app.close(); fs.rmSync(dir, { recursive: true, force: true }) }
+  }
+})

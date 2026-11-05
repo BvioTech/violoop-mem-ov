@@ -56,7 +56,7 @@ class BackgroundControl {
         // Complete HTTP submissions and journal transactions before asking the
         // engine to drain all durable queues, including vector follow-up work.
         if (this.active) { await sleep(this.retryMs); continue }
-        await this.app.drainSubmissions()
+        await this.app.drainSubmissions({ isCancelled: () => this.stopped || !this.paused })
         if (!this.paused || this.stopped) continue
         await this.client.waitProcessed()
         if (!this.paused || this.stopped) continue

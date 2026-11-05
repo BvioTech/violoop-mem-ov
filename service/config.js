@@ -38,16 +38,31 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
   const httpHost = args['http-host'] || env.QMD_HTTP_HOST || fileCfg.http_host || '127.0.0.1'
 
   const embeddingCfg = (fileCfg.embedding && !Array.isArray(fileCfg.embedding)) ? fileCfg.embedding : {}
+  const cpuOnlyValue = env.VIOLOOP_MEM_CPU_ONLY ?? embeddingCfg.cpu_only ?? false
+  if (![true, false, 'true', 'false', '1', '0'].includes(cpuOnlyValue)) throw new TypeError('embedding cpu_only must be true/false or 1/0')
+  const localLegacyDb = path.join(dataDir, 'graph.db')
+  // Installed upgrades read the old daemon's database in place. Source/test
+  // data directories must never discover hardware memory outside their scope.
+  const legacySourceFile = env.VIOLOOP_LEGACY_MEMORY_DB ||
+    (path.resolve(dataDir) === '/var/lib/violoop-mem-ov'
+      && (fs.existsSync('/opt/violoop-mem') || fs.existsSync('/var/lib/violoop-mem/graph.db')) ? '/var/lib/violoop-mem/graph.db' : localLegacyDb)
+
+  const repoRoot = path.resolve(__dirname, '..')
+  const bundledPython = path.resolve(repoRoot, '../runtime/python', process.platform === 'win32' ? 'python.exe' : 'bin/python3')
+  const sourcePython = path.join(repoRoot, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
+  const pythonPath = [path.join(repoRoot, 'openviking-python'), path.join(repoRoot, 'engine')]
+    .find(dir => fs.existsSync(path.join(dir, 'openviking/server/bootstrap.py')))
   return {
     backend: args.backend || env.VIOLOOP_MEM_OV_BACKEND || fileCfg.backend || 'openviking',
     openviking: {
       mode: args['openviking-mode'] || env.OPENVIKING_MODE || fileCfg.openviking?.mode || 'managed',
-      python: env.OPENVIKING_PYTHON || (fs.existsSync(path.join(__dirname, '../.venv/bin/python')) ? path.join(__dirname, '../.venv/bin/python') : '/usr/bin/python3'),
-      pythonPath: env.OPENVIKING_PYTHONPATH || (fs.existsSync(path.join(__dirname, '../engine/openviking/server/bootstrap.py')) ? path.join(__dirname, '../engine') : '/opt/violoop-mem-ov/openviking-python'),
+      python: env.OPENVIKING_PYTHON || [bundledPython, sourcePython].find(file => fs.existsSync(file)) || '/usr/bin/python3',
+      pythonPath: env.OPENVIKING_PYTHONPATH || pythonPath || '/opt/violoop-mem-ov/openviking-python',
       runtimeDir: env.OPENVIKING_RUNTIME_DIR || path.dirname(socket),
       deviceModelUrl: env.OPENVIKING_DEVICE_MODEL_URL || 'http://127.0.0.1:9090/internal/memory/chat/completions',
       llmMaxTokens: Number(env.OPENVIKING_LLM_MAX_TOKENS || 4096),
-      legacySourceFile: env.VIOLOOP_LEGACY_MEMORY_DB || path.join(dataDir, 'graph.db'),
+      legacySourceFile,
+      coexistence: legacySourceFile === '/var/lib/violoop-mem/graph.db',
       migrationEmbedding: {
         timeoutMs: Number(env.VIOLOOP_MIGRATION_EMBEDDING_TIMEOUT_MS || 60000),
       },
@@ -76,6 +91,8 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
       // file is absent. auto_rerank is accepted-but-ignored (not ported).
       enabled: args['no-embedding'] ? false : embeddingCfg.enabled !== false,
       modelPath: args['embedding-model'] || embeddingCfg.model_path || null,
+      threads: args['embedding-threads'] ?? env.VIOLOOP_MEM_EMBEDDING_THREADS ?? embeddingCfg.threads,
+      cpuOnly: cpuOnlyValue === true || cpuOnlyValue === 'true' || cpuOnlyValue === '1',
     },
     zones: Array.isArray(fileCfg.zones) && fileCfg.zones.length
       ? fileCfg.zones.map(_normalizeZone).filter(Boolean)

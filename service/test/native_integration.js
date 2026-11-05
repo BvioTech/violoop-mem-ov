@@ -84,7 +84,8 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
     model.closeAllConnections(); await new Promise(r => model.close(r))
     fs.rmSync(dir, { recursive: true, force: true })
   })
-  const file = linkedLegacyDatabase(path.join(dir, 'graph.db')), before = digest(file)
+  const file = linkedLegacyDatabase(path.join(dir, 'graph.db'))
+  let before = digest(file)
   const socket = path.join(dir, 'mem.sock')
   const config = loadConfig(['--socket', socket, '--data-dir', dir], {
     OPENVIKING_URL: `http://127.0.0.1:${await port()}`,
@@ -93,6 +94,7 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
     ...(process.env.VIOLOOP_TEST_PYTHON ? { OPENVIKING_PYTHON: process.env.VIOLOOP_TEST_PYTHON } : {}),
     ...(process.env.VIOLOOP_TEST_PYTHONPATH ? { OPENVIKING_PYTHONPATH: process.env.VIOLOOP_TEST_PYTHONPATH } : {}),
   })
+  config.openviking.coexistence = true
   // Deterministic normalized embeddings exercise the real C++ vector store.
   let modelPaused = false
   const embedder = { status: () => ({ state: modelPaused ? 'idle' : 'ready', dim: 1024 }),
@@ -118,6 +120,24 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
     return g.entities.length >= 2 && g.relations.length >= 1 && g
   })
   assert.ok(graph.entities.every(e => !/identity|soul/.test(e.id)))
+  const oldUris = graph.entities.map(e => e.id)
+  const db = new (require('better-sqlite3'))(file)
+  try { db.prepare("UPDATE memories SET content='corrected during legacy operation' WHERE key='a'").run() }
+  finally { db.close() }
+  before = digest(file)
+  assert.equal((await req('GET', '/v2/migration/status')).readyForCutover, false)
+  await until(async () => {
+    const state = await req('GET', '/v2/migration/status')
+    if (state.lastError) throw new Error(JSON.stringify(state))
+    return state.readyForCutover && extractionCalls > 1
+  })
+  graph = await until(async () => {
+    const g = await req('GET', '/v2/graph/export?view=memory&rebuild=1')
+    return g.entities.length >= 2 && !g.entities.some(e => oldUris.includes(e.id)) && g
+  })
+  const status = await req('GET', '/v2/migration/status')
+  assert.equal((await req('POST', '/v2/migration/activate', { sourceRevision: status.sourceRevision })).activated, true)
+  assert.equal(digest(file), before, 'catch-up and activation preserve the legacy source')
   const added = await req('POST', '/v1/memory-entries', { memoryType: 'entities', category: 'projects', name: 'manual', content: '# Manual\nA searchable local integration record.' })
   const uri = added.uri
   assert.ok(uri.endsWith('/entities/projects/manual.md'))
@@ -136,6 +156,7 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
   service = await start(config, { runtimeOptions: { embedder } })
   await until(async () => (await req('GET', '/readyz')).ready)
   assert.equal((await req('GET', '/v2/migration/status')).pendingCount, 0)
+  assert.equal((await req('GET', '/v2/migration/status')).activated, true)
   await wait(1000)
   assert.equal(extractionCalls, callsBefore, 'completed migration must not replay on restart')
   assert.equal(digest(file), before, 'old graph.db must remain byte-identical')

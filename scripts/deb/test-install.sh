@@ -44,7 +44,7 @@ build_deb() {  # $1=版本 $2=输出路径
 Package: violoop-mem-ov
 Version: $1
 Architecture: all
-Maintainer: violoop <josley@bvio.ai>
+Maintainer: doctor <doctor@bvio.ai>
 Description: violoop-mem-ov maintainer-script harness (payload trimmed)
 CTL
   for s in preinst postinst prerm postrm; do

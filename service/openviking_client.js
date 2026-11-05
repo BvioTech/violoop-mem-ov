@@ -90,6 +90,13 @@ class OpenVikingClient {
     return this.request('DELETE', '/api/v1/fs?' + new URLSearchParams({ uri, recursive: false, wait: false }),
       undefined, { timeoutMs: Math.max(this.timeoutMs, 120000) })
   }
+  async resetMigrationMemory() {
+    try {
+      return await this.request('DELETE', '/api/v1/fs?' + new URLSearchParams({
+        uri: 'viking://~/memories', recursive: true, wait: true, timeout: 120,
+      }), undefined, { timeoutMs: 130000 })
+    } catch (err) { if (err.upstreamStatus !== 404) throw err }
+  }
   grep(pattern, { uri = 'viking://~/memories', limit = 10, caseInsensitive = false } = {}) {
     return this.request('POST', '/api/v1/search/grep', {
       uri, pattern, node_limit: limit, case_insensitive: caseInsensitive,

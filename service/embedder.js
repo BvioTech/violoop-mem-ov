@@ -1,13 +1,14 @@
 /**
  * embedder.js — local GGUF embedding via node-llama-cpp。多模型 profile:
- * 现役 bge-m3(violoop-mem-ov-model deb),遗留 embeddinggemma(violoop-qmd-model
+ * 现役 bge-m3(violoop-mem-model deb),遗留 embeddinggemma(violoop-qmd-model
  * deb)自动兜底——提示词格式与标定常数按加载到的模型走(见 PROFILES)。
  *
  * Model resolution order (first hit wins):
  *   1. config embedding.model_path (absolute file)
  *   2. $QMD_MODELS_DIR/<candidate>(候选按 MODEL_CANDIDATES 优先级)
- *   3. /usr/local/share/violoop/mem-ov/models/<candidate>(violoop-mem-ov-model deb)
- *   4. /usr/local/share/violoop/qmd/models/<candidate>(遗留 qmd-model deb)
+ *   3. <service root>/models/<candidate> (source checkout)
+ *   4. /usr/local/share/violoop/mem/models/<candidate>(violoop-mem-model deb)
+ *   5. /usr/local/share/violoop/qmd/models/<candidate>(遗留 qmd-model deb)
  *
  * Unlike qmd there is NO automatic HuggingFace download fallback: on the
  * GFW-side boxes that hangs boot-adjacent code paths. Missing model (or
@@ -27,12 +28,13 @@ const path = require('path')
 const crypto = require('crypto')
 const { spawn } = require('child_process')
 
-// 候选模型按优先级排列:bge-m3(现役,violoop-mem-ov-model deb 提供)优先,
+// 候选模型按优先级排列:bge-m3(现役,violoop-mem-model deb 提供)优先,
 // embeddinggemma(遗留 violoop-qmd-model deb)兜底——过渡期老盒子没装新
-// 模型包时自动退回 gemma 继续工作。目录同理:mem-ov/models 新家优先。
+// 模型包时自动退回 gemma 继续工作。
 const MODEL_CANDIDATES = ['bge-m3-q8_0.gguf', 'embeddinggemma-300M-Q8_0.gguf']
+const LOCAL_MODELS_DIR = path.resolve(__dirname, '../models')
 const SYSTEM_MODELS_DIRS = [
-  '/usr/local/share/violoop/mem-ov/models',
+  '/usr/local/share/violoop/mem/models',
   '/usr/local/share/violoop/qmd/models',
 ]
 
@@ -130,7 +132,13 @@ function probeNativeLoadable() {
 }
 
 class Embedder {
-  constructor({ enabled = true, modelPath = null } = {}) {
+  constructor({ enabled = true, modelPath = null, threads, cpuOnly = false } = {}) {
+    if (threads !== undefined && (!Number.isInteger(Number(threads)) || Number(threads) < 1 || Number(threads) > 256)) {
+      throw new RangeError('embedding threads must be an integer in [1, 256]')
+    }
+    if (typeof cpuOnly !== 'boolean') throw new TypeError('cpuOnly must be boolean')
+    this.threads = threads === undefined ? undefined : Number(threads)
+    this.cpuOnly = cpuOnly
     this.enabled = enabled !== false
     this.explicitModelPath = modelPath
     this.state = this.enabled ? 'idle' : 'disabled' // idle|loading|ready|unavailable|disabled
@@ -147,7 +155,7 @@ class Embedder {
 
   resolveModelPath() {
     const candidates = [this.explicitModelPath].filter(Boolean)
-    const dirs = [process.env.QMD_MODELS_DIR, ...SYSTEM_MODELS_DIRS].filter(Boolean)
+    const dirs = [process.env.QMD_MODELS_DIR, LOCAL_MODELS_DIR, ...SYSTEM_MODELS_DIRS].filter(Boolean)
     for (const dir of dirs) for (const f of MODEL_CANDIDATES) candidates.push(path.join(dir, f))
     for (const p of candidates) {
       try { if (fs.existsSync(p) && fs.statSync(p).size > 0) return p } catch { /* unreadable */ }
@@ -170,7 +178,7 @@ class Embedder {
     this.state = 'loading'
     const modelPath = this.resolveModelPath()
     if (!modelPath) {
-      console.warn(`[embedder] no model found (${MODEL_CANDIDATES.join('/')} in QMD_MODELS_DIR / ${SYSTEM_MODELS_DIRS.join(' / ')}); lexical-only search`)
+      console.warn(`[embedder] no model found (${MODEL_CANDIDATES.join('/')} in QMD_MODELS_DIR / ${LOCAL_MODELS_DIR} / ${SYSTEM_MODELS_DIRS.join(' / ')}); embeddings unavailable`)
       this.state = 'unavailable'
       return
     }
@@ -187,10 +195,10 @@ class Embedder {
     try {
       // Optional dependency — absent on platforms without prebuilds.
       const { getLlama, LlamaLogLevel } = await import('node-llama-cpp')
-      const llama = await getLlama({ logLevel: LlamaLogLevel.error })
+      const llama = await getLlama({ logLevel: LlamaLogLevel.error, ...(this.cpuOnly ? { gpu: false } : {}) })
       const model = await llama.loadModel({ modelPath })
       this._model = model
-      this._ctx = await model.createEmbeddingContext()
+      this._ctx = await model.createEmbeddingContext(this.threads === undefined ? {} : { threads: this.threads })
       const probe = await this._ctx.getEmbeddingFor(this.profile.doc('none', 'probe'))
       this.dim = probe.vector.length
       this.modelPath = modelPath
@@ -255,7 +263,10 @@ class Embedder {
   }
 
   status() {
-    return { state: this.state, model: this.modelPath ? path.basename(this.modelPath) : null, dim: this.dim || null }
+    const runtime = this._ctx?._llamaContext
+    return { state: this.state, model: this.modelPath ? path.basename(this.modelPath) : null, dim: this.dim || null,
+      threads: runtime && !runtime.disposed ? runtime.currentThreads : (this.threads ?? null),
+      ...(this._model ? { backend: this._model.llama.gpu === false ? 'cpu' : String(this._model.llama.gpu) } : {}) }
   }
 
   // 图召回语义腿的原始余弦下限(跟随已加载模型的标定;server 每次召回读取)
