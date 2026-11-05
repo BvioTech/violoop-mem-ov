@@ -70,6 +70,8 @@ Release 发布后，独立的 APT 通知任务使用真实仓库名和 tag 向�
 
 ## 旧记忆保护
 
+本地 BGE 向量计算默认按模型自身的分词结果保留前 4096 个 token，不额外按字符数截断，也不截断磁盘上的记忆正文。限制在推理入口执行，对恢复的旧队列任务也生效；模型自动添加的起止 token 另留空间。可通过 `embedding.max_input_tokens`、`VIOLOOP_MEM_EMBEDDING_MAX_INPUT_TOKENS` 或 `--embedding-max-input-tokens` 调整（16–8192，同时受模型实际上下文限制）。`GET /runtimez` 的 `embedding.maxInputTokens`、`truncatedInputs` 和 `lastInput` 提供上限、截断次数及不包含正文的分词/计算耗时。
+
 默认只读读取数据目录内的 `graph.db`，也可显式指定 `VIOLOOP_LEGACY_MEMORY_DB`。新记忆写入 `openviking/`，迁移进度写入 `legacy-migration/`，可重建图谱写入 `openviking-graph.db`。迁移不会删除旧文件或旧数据库，成功后也不自动清理。卸载或 purge 同样保留记忆数据。
 
 首次就绪自动迁移。失败最多自动重试三轮（10/30/60 秒）；已成功批次不会重放。提交结果未确认、任务及归档结果缺失的批次统一按 failed 处理，共用三轮自动重试额度；每次手动重试只补跑一轮。手动入口及 Device/PC HTTP 协议保持兼容。Identity/Soul 模板由运行配置禁用；不会自动删除历史文件。

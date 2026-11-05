@@ -27,6 +27,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { spawn } = require('child_process')
+const DEFAULT_MAX_INPUT_TOKENS = 4096
 
 // 候选模型按优先级排列:bge-m3(现役,violoop-mem-model deb 提供)优先,
 // embeddinggemma(遗留 violoop-qmd-model deb)兜底——过渡期老盒子没装新
@@ -132,11 +133,17 @@ function probeNativeLoadable() {
 }
 
 class Embedder {
-  constructor({ enabled = true, modelPath = null, threads, cpuOnly = false } = {}) {
+  constructor({ enabled = true, modelPath = null, threads, cpuOnly = false, maxInputTokens = DEFAULT_MAX_INPUT_TOKENS } = {}) {
     if (threads !== undefined && (!Number.isInteger(Number(threads)) || Number(threads) < 1 || Number(threads) > 256)) {
       throw new RangeError('embedding threads must be an integer in [1, 256]')
     }
     if (typeof cpuOnly !== 'boolean') throw new TypeError('cpuOnly must be boolean')
+    if (!Number.isInteger(Number(maxInputTokens)) || Number(maxInputTokens) < 16 || Number(maxInputTokens) > 8192) {
+      throw new RangeError('embedding maxInputTokens must be an integer in [16, 8192]')
+    }
+    this.maxInputTokens = Number(maxInputTokens)
+    this.truncatedInputs = 0
+    this.lastInput = null
     this.threads = threads === undefined ? undefined : Number(threads)
     this.cpuOnly = cpuOnly
     this.enabled = enabled !== false
@@ -228,9 +235,28 @@ class Embedder {
     if (this._suspended) return null
     this._active++
     try {
-      const e = await this._ctx.getEmbeddingFor(formatted)
+      // Bound inference with the embedding model's own tokenizer. This also
+      // applies to durable OpenViking jobs accepted before this limit existed.
+      // Leave room for the beginning/end tokens added by node-llama-cpp;
+      // neither the source memory nor its stored content is modified.
+      const started = Date.now()
+      const timing = this.lastInput = { inputChars: formatted.length, tokenizedChars: formatted.length,
+        usedTokens: 0, startedAt: started, state: 'tokenizing' }
+      const tokens = this._model.tokenize(formatted, false)
+      timing.tokenizeMs = Date.now() - started
+      const contextLimit = Math.max(1, (this._ctx._llamaContext?.contextSize || this._model.trainContextSize || this.maxInputTokens + 4) - 4)
+      const budget = Math.min(this.maxInputTokens, contextLimit)
+      const input = tokens.length > budget ? tokens.slice(0, budget) : tokens
+      if (tokens.length > budget && !retried) this.truncatedInputs++
+      timing.usedTokens = input.length
+      timing.state = 'computing'
+      const inferenceStarted = Date.now()
+      const e = await this._ctx.getEmbeddingFor(input)
+      timing.inferenceMs = Date.now() - inferenceStarted
+      timing.state = 'complete'
       return new Float32Array(e.vector)
     } catch (err) {
+      if (this.lastInput) this.lastInput.state = 'error'
       // getEmbeddingFor fails intermittently under sustained sequential
       // load; one retry recovers it (observed during calibration probing).
       if (!retried && !this._suspended) return await this._embed(formatted, true)
@@ -265,6 +291,8 @@ class Embedder {
   status() {
     const runtime = this._ctx?._llamaContext
     return { state: this.state, model: this.modelPath ? path.basename(this.modelPath) : null, dim: this.dim || null,
+      maxInputTokens: this.maxInputTokens, truncatedInputs: this.truncatedInputs,
+      lastInput: this.lastInput ? { ...this.lastInput } : null,
       threads: runtime && !runtime.disposed ? runtime.currentThreads : (this.threads ?? null),
       ...(this._model ? { backend: this._model.llama.gpu === false ? 'cpu' : String(this._model.llama.gpu) } : {}) }
   }

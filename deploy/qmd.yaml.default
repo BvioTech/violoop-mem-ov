@@ -6,6 +6,8 @@ socket_mode: "0660"
 socket_group: violoop
 embedding:
   enabled: true
+  # Bound vector inference only; source memory files retain their full content.
+  max_input_tokens: 4096
 openviking:
   mode: managed
   url: http://127.0.0.1:1933

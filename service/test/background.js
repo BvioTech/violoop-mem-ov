@@ -72,7 +72,7 @@ test('BGE suspend drains readers and loading, disposes context then model exactl
   const e = new Embedder(), compute = deferred(), events = []
   e.state = 'ready'; e.profile = { query: x => x }
   e._ctx = { getEmbeddingFor: () => compute.promise, dispose: async () => events.push('context') }
-  e._model = { dispose: async () => events.push('model') }
+  e._model = { tokenize: text => Array.from(text, ch => ch.codePointAt(0)), dispose: async () => events.push('model') }
   const work = e.embedQuery('query')
   await until(() => e._active === 1)
   const p1 = e.suspend(), p2 = e.suspend()

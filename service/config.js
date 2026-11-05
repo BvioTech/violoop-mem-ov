@@ -92,6 +92,7 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
       enabled: args['no-embedding'] ? false : embeddingCfg.enabled !== false,
       modelPath: args['embedding-model'] || embeddingCfg.model_path || null,
       threads: args['embedding-threads'] ?? env.VIOLOOP_MEM_EMBEDDING_THREADS ?? embeddingCfg.threads,
+      maxInputTokens: args['embedding-max-input-tokens'] ?? env.VIOLOOP_MEM_EMBEDDING_MAX_INPUT_TOKENS ?? embeddingCfg.max_input_tokens ?? 4096,
       cpuOnly: cpuOnlyValue === true || cpuOnlyValue === 'true' || cpuOnlyValue === '1',
     },
     zones: Array.isArray(fileCfg.zones) && fileCfg.zones.length
