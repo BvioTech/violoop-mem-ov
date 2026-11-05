@@ -113,6 +113,7 @@ test('managed lifecycle confines engine and gateway to loopback and terminates c
       child.kill = signal => { child.emit('exit', 0, signal); return true }
       return child
     } })
+  t.after(() => runtime.stop())
   assert.equal(runtime.status().pid, 1234)
   assert.equal(await runtime.modelReady(), false)
   modelReady = true
@@ -133,9 +134,9 @@ test('managed lifecycle confines engine and gateway to loopback and terminates c
     const override = path.join(conf.memory.custom_templates_dir, `${type}.yaml`)
     assert.match(original, /^enabled: true$/m)
     assert.equal(fs.readFileSync(override, 'utf8'), original.replace('enabled: true', 'enabled: false'))
-    assert.equal(fs.statSync(override).mode & 0o777, 0o600)
+    if (process.platform !== 'win32') assert.equal(fs.statSync(override).mode & 0o777, 0o600)
   }
-  assert.equal(fs.statSync(args[3]).mode & 0o777, 0o600)
+  if (process.platform !== 'win32') assert.equal(fs.statSync(args[3]).mode & 0o777, 0o600)
   child.emit('exit', 1, null)
   assert.equal(runtime.status().pid, null)
   assert.equal(runtime.status().lastExit.code, 1)
@@ -148,10 +149,10 @@ test('managed lifecycle confines engine and gateway to loopback and terminates c
 })
 test('native config preserves workspace ownership and bounded workers', () => {
   const conf = nativeConfig({ dataDir: '/state', openviking: { url: 'http://127.0.0.1:1933', llmMaxTokens: 4096, runtimeDir: '/run/violoop-mem-ov' } }, 'http://127.0.0.1:1/v1', 'token', 'engine')
-  assert.equal(conf.storage.workspace, '/state/openviking')
+  assert.equal(conf.storage.workspace, path.join('/state', 'openviking'))
   assert.equal(conf.embedding.dense.dimension, 1024)
   assert.equal(conf.memory.link_enabled, true)
-  assert.equal(conf.memory.custom_templates_dir, '/run/violoop-mem-ov/memory-templates')
+  assert.equal(conf.memory.custom_templates_dir, path.join('/run/violoop-mem-ov', 'memory-templates'))
   assert.equal(conf.queue_workers.session_commit.max_concurrent, 1)
 })
 

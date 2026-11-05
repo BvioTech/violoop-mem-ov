@@ -9,6 +9,7 @@ import importlib.util
 import os
 import platform
 import sys
+import sysconfig
 from pathlib import Path
 from types import ModuleType
 
@@ -32,9 +33,10 @@ _WINDOWS_DLL_DIR_HANDLES = []
 
 
 def _is_x86_machine(machine: str | None = None) -> bool:
-    normalized = (machine or platform.machine() or "").strip().lower()
-    # platform.machine() returns empty string on some Windows 11 builds.
-    # Default to x86 on Windows since ARM is not yet widely deployed.
+    interpreter_machine = sysconfig.get_platform().removeprefix("win-") if sys.platform == "win32" else platform.machine()
+    normalized = (machine or interpreter_machine or "").strip().lower()
+    # Retain the legacy fallback for embedders that report no platform tag.
+    # A normal Windows interpreter uses its ABI tag, including win-arm64.
     if not normalized:
         return sys.platform == "win32"
     return any(token in normalized for token in ("x86_64", "amd64", "x64", "i386", "i686"))

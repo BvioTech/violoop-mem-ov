@@ -14,7 +14,7 @@ const { mergeSearch } = require('../hybrid_search')
 const { boundPreviews } = require('../retrieval_budget')
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-ov-'))
-const socket = path.join(temp, 'mem.sock')
+const socket = process.platform === 'win32' ? `\\\\.\\pipe\\memov-contract-${process.pid}` : path.join(temp, 'mem.sock')
 const calls = []
 let adapter, upstream, config
 let ready = true, behavior = 'ok', taskStatus = 'completed'
@@ -159,7 +159,7 @@ before(async () => {
 })
 
 after(async () => {
-  adapter?.shutdown()
+  await adapter?.shutdown()
   upstream.closeAllConnections()
   await new Promise(resolve => upstream.close(resolve))
   fs.rmSync(temp, { recursive: true, force: true })
@@ -616,7 +616,7 @@ test('fact-only device evidence is passed to native extraction; ambiguous writes
   assert.equal(calls.length, count)
 })
 
-test('restart preserves ingest journal; regular files and active sockets are never replaced', async () => {
+test('restart preserves ingest journal; regular files and active sockets are never replaced', { skip: process.platform === 'win32' }, async () => {
   const journals = fs.readdirSync(path.join(temp, 'openviking-adapter/ingests'))
     .map(name => JSON.parse(fs.readFileSync(path.join(temp, 'openviking-adapter/ingests', name))))
   const record = journals.find(r => r.result)
@@ -659,7 +659,7 @@ test('oversized requests return a JSON 413 without closing the connection premat
   assert.equal(response.body.error.code, 'invalid_query')
 })
 
-test('a socket left by SIGKILL can be safely reused', async () => {
+test('a socket left by SIGKILL can be safely reused', { skip: process.platform === 'win32' }, async () => {
   if (process.platform === 'win32') return
   const stale = path.join(temp, 'stale.sock')
   const child = spawn(process.execPath, ['-e', 'require("net").createServer().listen(process.argv[1], () => console.log("ready"))', stale], { stdio: ['ignore', 'pipe', 'inherit'] })

@@ -2,7 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const net = require('net')
-const { spawn } = require('child_process')
+const { spawn, execFile } = require('child_process')
 const { Embedder } = require('./embedder')
 const { startModelGateway } = require('./model_gateway')
 const { createMigrationEmbedder } = require('./migration_embedding')
@@ -103,6 +103,7 @@ async function startRuntime(config, { spawnProcess = spawn, embedder = new Embed
         VIOLOOP_MIGRATION_TIMING_DIR: timingDir,
         NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
       stdio: ['ignore', 'inherit', 'inherit'],
+      windowsHide: true,
     })
     let exited = false
     const onExit = (code, signal) => {
@@ -153,11 +154,23 @@ async function startRuntime(config, { spawnProcess = spawn, embedder = new Embed
       stopping = true; clearTimeout(timer)
       const running = child
       if (running) {
-        await new Promise(resolve => {
-          const killTimer = setTimeout(() => running.kill('SIGKILL'), 10000)
-          running.once('exit', () => { clearTimeout(killTimer); resolve() })
-          running.kill('SIGTERM')
-        })
+        if (process.platform === 'win32' && spawnProcess === spawn) {
+          // Windows venv python.exe is a launcher with a child interpreter.
+          // Killing only the launcher leaves the engine holding its TCP port.
+          await new Promise((resolve, reject) => {
+            execFile('taskkill', ['/PID', String(running.pid), '/T', '/F'],
+              { windowsHide: true, timeout: 10000 }, error => {
+                if (error && running.exitCode === null && running.signalCode === null) reject(error)
+                else resolve()
+              })
+          })
+        } else {
+          await new Promise(resolve => {
+            const killTimer = setTimeout(() => running.kill('SIGKILL'), 10000)
+            running.once('exit', () => { clearTimeout(killTimer); resolve() })
+            running.kill('SIGTERM')
+          })
+        }
       }
       gateway.server.closeAllConnections()
       await new Promise(resolve => gateway.server.close(resolve))

@@ -5,7 +5,7 @@ const path = require('node:path')
 const {loadConfig} = require('../config')
 const {Embedder} = require('../embedder')
 
-test('installed upgrades discover old memory read-only; isolated data and explicit sources stay scoped', t => {
+test('installed upgrades discover old memory read-only; isolated data and explicit sources stay scoped', { skip: process.platform === 'win32' }, t => {
   const exists = fs.existsSync.bind(fs)
   const old = '/var/lib/violoop-mem/graph.db'
   const local = '/var/lib/violoop-mem-ov/graph.db'
@@ -18,6 +18,13 @@ test('installed upgrades discover old memory read-only; isolated data and explic
   assert.equal(loadConfig(args, {}).openviking.legacySourceFile, old)
   assert.equal(loadConfig(args, {}).openviking.coexistence, true)
   assert.equal(loadConfig(['--data-dir', '/isolated/test'], {}).openviking.legacySourceFile, '/isolated/test/graph.db')
+})
+
+test('source deployments keep legacy discovery inside their own data directory on every platform', () => {
+  const dir = path.resolve('isolated-test-data')
+  assert.equal(loadConfig(['--data-dir', dir], {}).openviking.legacySourceFile, path.join(dir, 'graph.db'))
+  const explicit = path.join(dir, 'source.db')
+  assert.equal(loadConfig(['--data-dir', dir], { VIOLOOP_LEGACY_MEMORY_DB: explicit }).openviking.legacySourceFile, explicit)
 })
 
 test('device embedding controls are parsed and invalid values are rejected', () => {

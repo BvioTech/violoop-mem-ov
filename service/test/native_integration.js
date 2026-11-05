@@ -86,7 +86,7 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
   })
   const file = linkedLegacyDatabase(path.join(dir, 'graph.db'))
   let before = digest(file)
-  const socket = path.join(dir, 'mem.sock')
+  const socket = process.platform === 'win32' ? `\\\\.\\pipe\\memov-native-${process.pid}` : path.join(dir, 'mem.sock')
   const config = loadConfig(['--socket', socket, '--data-dir', dir], {
     OPENVIKING_URL: `http://127.0.0.1:${await port()}`,
     OPENVIKING_DEVICE_MODEL_URL: `http://127.0.0.1:${model.address().port}/internal/memory/chat/completions`,

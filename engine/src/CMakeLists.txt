@@ -298,6 +298,11 @@ if(OV_PLATFORM_X86)
     target_include_directories(engine_module_x86_caps PRIVATE ${Python3_INCLUDE_DIRS})
     target_compile_definitions(engine_module_x86_caps PRIVATE Py_LIMITED_API=0x030A0000)
     ov_link_python_abi(engine_module_x86_caps)
+    # Match the engine module: the capability probe must load without MinGW
+    # runtime DLLs being installed on the user's PATH.
+    if(MINGW)
+        target_link_options(engine_module_x86_caps PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
     set_target_properties(
         engine_module_x86_caps
         PROPERTIES

@@ -64,7 +64,8 @@ test('timing report retains failed attempt durations after a successful retry', 
       event: 'stage', stage: 'llm.request', durationMs: 100, status: 'error' })
     appendTiming(path.join(root, 'timings'), 'new-task-gateway', { taskId: 'new-task',
       event: 'stage', stage: 'llm.request', durationMs: 200, status: 'ok' })
-    const p = spawnSync('python3', [path.join(__dirname, '../../scripts/migration-timing-report.py'), '--data-dir', dir], { encoding: 'utf8' })
+    const python = process.env.OPENVIKING_PYTHON || process.env.PYTHON || 'python3'
+    const p = spawnSync(python, [path.join(__dirname, '../../scripts/migration-timing-report.py'), '--data-dir', dir], { encoding: 'utf8' })
     assert.equal(p.status, 0, p.stderr)
     const report = JSON.parse(p.stdout), batch = report.batches[0]
     assert.equal(batch.stages['llm.request'].durationMs, 300)

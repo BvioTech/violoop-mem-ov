@@ -35,7 +35,11 @@ CMAKE_PATH = shutil.which("cmake") or "cmake"
 C_COMPILER_PATH = os.environ.get("CC") or shutil.which("gcc") or "gcc"
 CXX_COMPILER_PATH = os.environ.get("CXX") or shutil.which("g++") or "g++"
 ENGINE_SOURCE_DIR = "src/"
-ENGINE_BUILD_CONFIG = get_host_engine_build_config(platform.machine())
+# Under Windows on Arm, an emulated x64 Python can report the host's ARM64
+# machine. Extensions must instead match the interpreter's ABI.
+ENGINE_BUILD_CONFIG = get_host_engine_build_config(
+    sysconfig.get_platform().removeprefix("win-") if sys.platform == "win32" else platform.machine()
+)
 SKIP_CPP_BUILD = os.environ.get("OV_SKIP_CPP_BUILD") == "1"
 
 
@@ -302,6 +306,12 @@ class OpenVikingBuildExt(build_ext):
             try:
                 print("Building ragfs-python (Rust RAGFS binding) via maturin...")
                 env = _sanitize_native_build_env(os.environ.copy())
+                if sys.platform == "win32":
+                    # Rust's host can be Arm64 while Python targets x64. Ensure
+                    # the final MSVC link finds this interpreter's stable ABI.
+                    python_lib_dir = str(Path(sys.base_prefix) / "libs")
+                    env["LIB"] = os.pathsep.join(filter(None, [python_lib_dir, env.get("LIB")]))
+                    env.setdefault("PYO3_PYTHON", sys.executable)
                 build_args = [
                     sys.executable,
                     "-m",
@@ -443,8 +453,7 @@ class OpenVikingBuildExt(build_ext):
             "-DCMAKE_VERBOSE_MAKEFILE=ON",
             "-DCMAKE_INSTALL_RPATH=$ORIGIN",
             f"-DPython3_EXECUTABLE={sys.executable}",
-            f"-DPython3_INCLUDE_DIRS={sysconfig.get_path('include')}",
-            f"-DPython3_LIBRARIES={sysconfig.get_config_vars().get('LIBRARY')}",
+            f"-DPython3_INCLUDE_DIR={sysconfig.get_path('include')}",
             f"-DCMAKE_C_COMPILER={C_COMPILER_PATH}",
             f"-DCMAKE_CXX_COMPILER={CXX_COMPILER_PATH}",
         ]
@@ -457,6 +466,9 @@ class OpenVikingBuildExt(build_ext):
         elif sys.platform == "win32":
             windows_python_sabi_library = _get_windows_python_sabi_library()
             cmake_args.append(f"-DOV_PYTHON_SABI_LIBRARY={windows_python_sabi_library}")
+            cmake_args.append(f"-DPython3_SABI_LIBRARY={windows_python_sabi_library}")
+            python_library = Path(sys.base_prefix) / "libs" / f"python{sys.version_info.major}{sys.version_info.minor}.lib"
+            cmake_args.append(f"-DPython3_LIBRARY={python_library}")
             cmake_args.extend(["-G", "MinGW Makefiles"])
 
         self.spawn([self.cmake_executable] + cmake_args)

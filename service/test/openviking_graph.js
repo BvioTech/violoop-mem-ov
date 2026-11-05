@@ -40,8 +40,14 @@ function fixture(t) {
     async readRaw(uri) { reads.push(uri); if (!files.has(uri)) throw Object.assign(new Error('missing'), { upstreamStatus: 404 }); return files.get(uri).text },
   }
   const graph = new OpenVikingGraph(client, { dataDir: dir, intervalMs: 0, auditMs: Number.MAX_SAFE_INTEGER })
-  t.after(async () => { await graph.close(); fs.rmSync(dir, { recursive: true, force: true }) })
-  return { dir, client, graph, files, reads, listingCalls: () => listingCalls, offline(value) { failListing = value } }
+  const resources = []
+  t.after(async () => {
+    for (const resource of resources.reverse()) await resource.close()
+    await graph.close()
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+  })
+  return { dir, client, graph, files, reads, own(resource) { resources.push(resource); return resource },
+    listingCalls: () => listingCalls, offline(value) { failListing = value } }
 }
 
 test('parse native memory fields; plain files use path type/name; metadata is not body', () => {
@@ -157,8 +163,7 @@ test('scope escape and incomplete pagination do not remove a previously indexed 
 test('adapter graph view is explicit and read-only; ordinary graph callers stay empty', async t => {
   const f = fixture(t)
   f.files.set(a, { stamp: '1', text: 'hello' })
-  const app = createApp(f.client, { dataDir: f.dir })
-  t.after(() => app.close())
+  const app = f.own(createApp(f.client, { dataDir: f.dir }))
   const request = async (method, url, body) => {
     const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))])
     req.method = method; req.url = url
@@ -214,8 +219,7 @@ test('accepted extraction does not update the graph; completion applies only rep
     async task() { return { status: taskStatus, result: { memory_diff_uri: 'viking://user/test/sessions/s/archive_1/memory_diff.json' } } },
     async read() { return JSON.stringify({ changed_uris: [a, b] }) },
   })
-  const app = createApp(f.client, { dataDir: f.dir })
-  t.after(() => app.close())
+  const app = f.own(createApp(f.client, { dataDir: f.dir }))
   async function request(method, url, body) {
     const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))])
     req.method = method; req.url = url

@@ -23,6 +23,8 @@ npm run setup -- --bootstrap-rust
 
 `npm ci` 仅安装 Node 依赖，不能代替上述完整安装。
 
+Windows on Arm 使用 x64 Python 时，原生扩展按 Python ABI 构建；本地编译、验证与 simulator 启动说明见 [Windows simulator](docs/windows-simulator.md)。
+
 ## 启动
 
 生产环境仍使用 `/run/violoop-mem-ov/violoop-mem-ov.sock`、`/var/lib/violoop-mem-ov` 和 `violoop-mem-ov.service`。源码启动会自动选择本仓库的 `.venv` 和 `engine`。

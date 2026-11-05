@@ -129,7 +129,7 @@ test('manual-only start, accepted is pending, restart resumes exactly one submis
   svc = new LegacyMigration({ dataDir: dir, sourceFile, client, journal, pollMs: 20 })
   await waitFor(() => svc.status().pendingCount === 0)
   assert.equal(submissions, 1)
-  assert.equal(fs.statSync(svc.file).mode & 0o777, 0o600)
+  if (process.platform !== 'win32') assert.equal(fs.statSync(svc.file).mode & 0o777, 0o600)
   await svc.start(); await waitFor(() => !svc.status().running)
   assert.equal(submissions, 1)
   svc.stop()
@@ -288,7 +288,7 @@ test('automatic retries stop after three rounds; each later manual start adds on
   assert.equal(f.svc.state.batches[1].attempts.length, 4)
   const issues = JSON.parse(fs.readFileSync(f.svc.issuesFile))
   assert.deepEqual(issues.history.map(x => x.attempt), [0, 1, 2, 3]); assert.equal(issues.batches[0].attempt, 4)
-  assert.equal(fs.statSync(f.svc.issuesFile).mode & 0o777, 0o600)
+  if (process.platform !== 'win32') assert.equal(fs.statSync(f.svc.issuesFile).mode & 0o777, 0o600)
 })
 
 test('restarting during an automatic retry resumes its exact submission without another retry round', async t => {
