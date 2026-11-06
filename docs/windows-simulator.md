@@ -5,8 +5,12 @@ on Arm. Native modules must match the Python ABI (`win-amd64`), not the host CPU
 reported by `platform.machine()`.
 
 The local simulator uses Node 24, Python 3.12, the existing OpenViking C++ vector
-engine, Rust RAGFS, and the `bge-m3-q8_0.gguf` embedding model. BGE runs on CPU;
-the separate Gemma service continues to use the GPU.
+engine, Rust RAGFS, and the `bge-m3-q8_0.gguf` embedding model. The sibling
+simulator launcher enables GPU auto-selection for BGE by default (verified as
+Vulkan with the x64 Node runtime); the separate Gemma service continues to use
+the GPU. Use the launcher's `-MemoryCpuOnly` switch for CPU mode and
+`-RestartMemory` to apply a backend change to an existing Memory process.
+Check `/runtimez` for the actual `embedding.backend` after startup.
 
 ## Native build
 
