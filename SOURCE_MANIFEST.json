@@ -60,7 +60,7 @@
           "path": "embedder.js",
           "sha256": "eccfd770d1f88ac7076045fe0fb9d8473d6c087f29d3a970932848979846313f",
           "destination": "service/embedder.js",
-          "integration_sha256": "21b981b39a8b90857f99fe65534e8a09159bee981539a2935ba68efdf2c02ce2"
+          "integration_sha256": "d1a1f0ab67e321547f504da015a9fc30da6c44c6e3a782edc05152c1b553283f"
         },
         {
           "path": "event_time_decay.js",
@@ -155,7 +155,7 @@
           "path": "openviking_runtime.js",
           "sha256": "ef94ce946ae077b47f6d8847cc440fef49fa1f97a181e5db1255740280435687",
           "destination": "service/openviking_runtime.js",
-          "integration_sha256": "1de33b9af1993a944051d105073aa76c42101c0a213559c808c8dfb9233317c9"
+          "integration_sha256": "cc65ff02b3ccef6b4174d364db7f6bb2268349efa10e35beb1955a201bd110e2"
         },
         {
           "path": "openviking_uri.js",
@@ -243,7 +243,7 @@
           "path": "server.js",
           "sha256": "8d2ce671d5a6074ee28b9e7509092771dbf70b3ec2fbb3a7937d465667941d2a",
           "destination": "service/server.js",
-          "integration_sha256": "9a7b6af5f203f932484b3ac6a93bf5338bf77ab431d32b9a077840352cb289f9"
+          "integration_sha256": "1037665df34c8855795400b845ce9429e87ed32e8bd4a3da385adf7d9cf11ff8"
         },
         {
           "path": "test/agent_memory.js",

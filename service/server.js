@@ -54,8 +54,14 @@ async function start(config, { runtimeOptions } = {}) {
     try { background = new (require('./background').BackgroundControl)({ dataDir: config.dataDir, app, client, runtime }) }
     catch (err) { await app.close(); await runtime.stop(); throw err }
   }
+  const embeddings = runtime?.createEmbeddingApi(task => background.run(task))
   const handler = async (req, res) => {
     const route = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '')
+    if (route === '/models/embeddings') {
+      if (embeddings) return embeddings(req, res)
+      res.writeHead(503, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ error: 'managed_local_embedding_required' }))
+    }
     if (route === '/license') {
       if (req.method !== 'GET') { res.writeHead(405, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { code: 'method_not_allowed', message: 'Method not allowed' } })) }
       res.writeHead(200, { 'content-type': 'application/json' })
