@@ -30,7 +30,7 @@ function createEmbeddingApi({ embedder, gatewayUrl, token, run = task => task() 
   }
   function encode(input, signal) {
     return new Promise((resolve, reject) => {
-      const payload = Buffer.from(JSON.stringify({ model: 'bge-m3', input, encoding_format: 'float' }))
+      const payload = Buffer.from(JSON.stringify({ model: 'bge-m3', input, input_type: 'document', encoding_format: 'float' }))
       const request = http.request(gatewayUrl + '/embeddings', { method: 'POST', signal,
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'content-length': payload.length } }, response => {
         const chunks = []; let size = 0

@@ -14,6 +14,51 @@ const { startRuntime, nativeConfig } = require('../openviking_runtime')
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const close = server => new Promise(resolve => { server.closeAllConnections(); server.close(resolve) })
 
+test('long retrieval queries are compiled before BGE admission; document vectors retain full original input', async t => {
+  const vectors = [], sources = []
+  let release, started
+  const received = new Promise(resolve => { started = resolve })
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = []; for await (const chunk of req) chunks.push(chunk)
+    sources.push(JSON.parse(Buffer.concat(chunks)))
+    assert.equal(req.url, '/internal/memory/retrieval-query')
+    assert.equal(req.headers.authorization, 'Bearer key')
+    release = () => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ version: 1, query: 'Review moved; not cancelled' })) }
+    started()
+  })
+  await listen(upstream); t.after(() => close(upstream))
+  const gateway = await startModelGateway({ token: 'key',
+    deviceUrl: `http://127.0.0.1:${upstream.address().port}/internal/memory/chat/completions`,
+    embedder: { async embedQuery(text) { vectors.push(text); return Array(1024).fill(0.25) } } })
+  t.after(() => close(gateway.server))
+  const post = (input, input_type) => fetch(gateway.url + '/embeddings', { method: 'POST',
+    headers: { authorization: 'Bearer key' }, body: JSON.stringify({ model: 'bge-m3', input, input_type }) })
+  const original = 'Full original evidence. '.repeat(250)
+  const pending = post(original, 'query')
+  await received
+  assert.equal((await post(original, 'document')).status, 200)
+  assert.deepEqual(vectors, [original]) // the compiler has not reserved the inference queue
+  release()
+  assert.equal((await pending).status, 200)
+  assert.deepEqual(sources, [{ version: 1, text: original }])
+  assert.deepEqual(vectors, [original, 'Review moved; not cancelled'])
+  assert.equal((await post('already compact', 'query')).status, 200)
+  assert.equal(sources.length, 1)
+})
+
+test('query compilation failure never submits the long source to BGE', async t => {
+  const upstream = http.createServer((req, res) => { req.resume(); res.writeHead(503); res.end('{}') })
+  await listen(upstream); t.after(() => close(upstream))
+  let embedded = 0
+  const gateway = await startModelGateway({ token: 'key',
+    deviceUrl: `http://127.0.0.1:${upstream.address().port}/internal/memory/chat/completions`,
+    embedder: { async embedQuery() { embedded++; return Array(1024).fill(0.25) } } })
+  t.after(() => close(gateway.server))
+  const response = await fetch(gateway.url + '/embeddings', { method: 'POST', headers: { authorization: 'Bearer key' },
+    body: JSON.stringify({ model: 'bge-m3', input: 'long source '.repeat(500), input_type: 'query' }) })
+  assert.equal(response.status, 503); assert.equal(embedded, 0)
+})
+
 test('source and relocated runtimes discover adjacent models while preserving explicit and environment overrides', t => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vm-model-path-')))
   const previous = process.env.QMD_MODELS_DIR

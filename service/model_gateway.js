@@ -3,6 +3,8 @@
 const http = require('http')
 const crypto = require('crypto')
 const { gatewayTiming } = require('./migration_timing')
+const { createEmbeddingQueue } = require('./embedding_queue')
+const { createQueryPreparer } = require('./retrieval_query')
 
 function authorized(req, token) {
   const actual = Buffer.from(req.headers.authorization || '')
@@ -24,14 +26,15 @@ async function readBody(req, max = 2 * 1024 * 1024) {
     throw Object.assign(new Error('invalid JSON'), { status: 400 })
   }
 }
-async function startModelGateway({ embedder, migrationEmbedder = null, token, deviceUrl, port = 0, timingDir }) {
+async function startModelGateway({ embedder, migrationEmbedder = null, token, deviceUrl, port = 0, timingDir,
+  prepareQuery = createQueryPreparer({ deviceModelUrl: deviceUrl, token }) }) {
   const device = new URL(deviceUrl)
   if (device.protocol !== 'http:' || device.hostname !== '127.0.0.1' || device.username || device.password) {
     throw new Error('device model URL must use HTTP on 127.0.0.1 without credentials')
   }
   let paused = false
   let active = 0
-  const queues = { local: { tail: Promise.resolve(), queued: 0 }, remote: { tail: Promise.resolve(), queued: 0 } }
+  const queues = { local: createEmbeddingQueue(), remote: createEmbeddingQueue() }
   const server = http.createServer(async (req, res) => {
     if (!authorized(req, token)) return json(res, 403, { error: { message: 'forbidden' } })
     if (paused) return json(res, 503, { error: { message: 'Memory background is paused' } })
@@ -56,13 +59,27 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
         const backend = remote ? 'remote' : 'local'
         const selectedEmbedder = remote ? migrationEmbedder : embedder
         const queue = queues[backend]
-        if (queue.queued >= 8) return json(res, 429, { error: { message: 'embedding queue full' } })
-        queue.queued++
-        const queueDone = timing?.stage('bge.gateway_queue', { purpose: timing.purpose, inputCount: inputs.length, backend })
-        const work = queue.tail.then(async () => {
-          queueDone?.()
-          const data = []
+        const query = body.input_type === 'query'
+        const measured = { preparationMs: 0, queueMs: 0, computeMs: 0 }
+        const started = Date.now(), requestId = crypto.randomUUID()
+        let status = 'ok'
+        const data = []
+        let embeddingChars = 0, phase = 'preparation'
+        try {
+          const prepared = []
+          // Compile before entering the BGE queue. A cloud call must never hold
+          // the local inference slot or change document/index embeddings.
           for (const input of inputs) {
+            if (abort.signal.aborted) throw Object.assign(Error('request cancelled'), { status: 499 })
+            prepared.push(query && !remote ? await prepareQuery(input, { signal: abort.signal }) : input)
+          }
+          measured.preparationMs = Date.now() - started
+          phase = 'embedding'
+          embeddingChars = prepared.reduce((n, s) => n + s.length, 0)
+          const queueDone = timing?.stage('bge.gateway_queue', { purpose: timing.purpose, inputCount: inputs.length, backend })
+          const result = await queue.run(async () => {
+            if (!data.length) queueDone?.()
+            const input = prepared[data.length]
             if (res.destroyed) throw Object.assign(new Error('request cancelled'), { status: 499 })
             const done = timing?.stage('bge.compute', { purpose: timing.purpose, inputChars: input.length, backend })
             let vector
@@ -72,11 +89,19 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
               throw Object.assign(new Error('BGE embedding unavailable'), { status: 503 })
             }
             data.push({ object: 'embedding', index: data.length, embedding: Array.from(vector) })
-          }
-          return { object: 'list', model: 'bge-m3', data }
-        })
-        queue.tail = work.catch(() => {})
-        try { return json(res, 200, await work) } finally { queue.queued-- }
+            return { done: data.length === inputs.length, result: { object: 'list', model: 'bge-m3', data } }
+          }, { query, signal: abort.signal, timing: measured })
+          if (!res.destroyed) return json(res, 200, result)
+        } catch (error) {
+          if (phase === 'preparation') measured.preparationMs = Date.now() - started
+          status = error.status || phase + '_error'; throw error
+        }
+        finally {
+          console.info('[bge.request]', JSON.stringify({ requestId, backend, purpose: query ? 'query' : 'document',
+            inputCount: inputs.length, inputChars: inputs.reduce((n, s) => n + s.length, 0), embeddingChars,
+            ...measured, elapsedMs: Date.now() - started, status }))
+        }
+        return
       }
       if (req.url === '/v1/chat/completions') {
         // Only the native migration provider emits this system-instruction
@@ -130,7 +155,7 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
     server.listen(port, '127.0.0.1', () => { server.removeListener('error', reject); resolve() })
   })
   return { server, setPaused(value) { paused = value }, async drain() {
-    while (active || queues.local.queued || queues.remote.queued) await new Promise(resolve => setTimeout(resolve, 10))
+    while (active || queues.local.pending || queues.remote.pending) await new Promise(resolve => setTimeout(resolve, 10))
   }, url: `http://127.0.0.1:${server.address().port}/v1` }
 }
 module.exports = { startModelGateway, authorized, readBody }
