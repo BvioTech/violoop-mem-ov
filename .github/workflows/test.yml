@@ -17,6 +17,26 @@ env:
   NPM_CONFIG_FETCH_RETRIES: "5"
 
 jobs:
+  build-commands:
+    name: Build commands (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s scripts/tests -p test_commands.py -v
+
   service:
     name: Service regression tests
     runs-on: ubuntu-24.04
