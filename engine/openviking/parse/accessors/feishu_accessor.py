@@ -22,8 +22,6 @@ from pathlib import Path
 from typing import Any, Dict, List, NoReturn, Optional, Tuple, Union
 from urllib.parse import parse_qs, unquote, urlparse, urlunparse
 
-from lark_oapi.core.cache import ICache
-
 from openviking.parse.base import format_table_to_markdown
 from openviking.parse.feishu_import import FeishuImportPlan, recursive_wiki
 from openviking.utils.exceptions import error_code_from_http_status
@@ -32,6 +30,7 @@ from openviking_cli.utils.logger import get_logger
 
 from .base import DataAccessor, LocalResource, SourceType
 from .feishu_session import FeishuAccessContext, FeishuApiSession
+from .feishu_token import TokenCache
 from .mime_types import get_preferred_extension
 
 logger = get_logger(__name__)
@@ -400,7 +399,7 @@ class FeishuAccessor(DataAccessor):
         self,
         session: Optional[FeishuApiSession] = None,
         *,
-        tenant_token_cache: Optional[ICache] = None,
+        tenant_token_cache: Optional[TokenCache] = None,
     ):
         """Initialize a shared selector or a request-scoped worker."""
         self._session = session

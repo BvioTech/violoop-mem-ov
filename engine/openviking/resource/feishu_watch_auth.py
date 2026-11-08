@@ -11,9 +11,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import httpx
-from lark_oapi.core.cache import ICache
 
 from openviking.parse.accessors.feishu_token import (
+    TokenCache,
     resolve_feishu_tenant_token_cache,
 )
 from openviking_cli.utils.config.parser_config import FeishuConfig
@@ -170,7 +170,7 @@ class FeishuOAuthClient:
         self,
         credentials: FeishuAppCredentials,
         *,
-        tenant_token_cache: ICache | None = None,
+        tenant_token_cache: TokenCache | None = None,
     ):
         self._credentials = credentials
         self._tenant_token_cache = resolve_feishu_tenant_token_cache(tenant_token_cache)
@@ -181,7 +181,7 @@ class FeishuOAuthClient:
         cls,
         config,
         *,
-        tenant_token_cache: ICache | None = None,
+        tenant_token_cache: TokenCache | None = None,
     ) -> "FeishuOAuthClient":
         return cls(
             load_feishu_app_credentials(config=config),
@@ -194,7 +194,7 @@ class FeishuOAuthClient:
         auth_state: Dict[str, Any],
         *,
         config,
-        tenant_token_cache: ICache | None = None,
+        tenant_token_cache: TokenCache | None = None,
     ) -> "FeishuOAuthClient":
         try:
             bound = feishu_config_from_auth_state(auth_state, config)

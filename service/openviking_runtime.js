@@ -99,7 +99,7 @@ async function startRuntime(config, { spawnProcess = spawn, embedder = new Embed
     child = spawnProcess(options.python, ['-m', 'openviking.server.bootstrap', '--config', configPath], {
       cwd: config.dataDir,
       env: { ...process.env, PYTHONPATH: options.pythonPath, PYTHONUNBUFFERED: '1',
-        PYTHONDONTWRITEBYTECODE: '1', OMP_NUM_THREADS: '2', OPENBLAS_NUM_THREADS: '1',
+        OMP_NUM_THREADS: '2', OPENBLAS_NUM_THREADS: '1',
         VIOLOOP_MIGRATION_TIMING_DIR: timingDir,
         NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
       stdio: ['ignore', 'inherit', 'inherit'],

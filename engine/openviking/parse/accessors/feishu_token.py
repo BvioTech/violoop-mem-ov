@@ -9,14 +9,21 @@ import threading
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Generator
+from typing import Generator, Protocol
 
-from lark_oapi.core.cache import ICache
+
+class TokenCache(Protocol):
+    """SDK-compatible cache contract without importing the optional SDK."""
+
+    def get(self, key: str) -> str | None: ...
+
+    def set(self, key: str, value: str, expire: int) -> None: ...
+
 
 _SDK_TOKEN_MANAGER_LOCK = threading.RLock()
 
 
-class InMemoryFeishuTokenCache(ICache):
+class InMemoryFeishuTokenCache(TokenCache):
     """Thread-safe default storage for namespaced tenant tokens."""
 
     def __init__(self) -> None:
@@ -39,7 +46,7 @@ class InMemoryFeishuTokenCache(ICache):
             self._entries[key] = (value, expire)
 
 
-class FeishuTenantTokenCache(ICache):
+class FeishuTenantTokenCache(TokenCache):
     """lark-oapi ``ICache`` adapter with credential-scoped keys.
 
     lark-oapi only passes ``self_tenant_token:{app_id}`` to ``ICache`` and
@@ -48,7 +55,7 @@ class FeishuTenantTokenCache(ICache):
     Accounts without exposing a raw secret in the storage key.
     """
 
-    def __init__(self, backend: ICache | None = None) -> None:
+    def __init__(self, backend: TokenCache | None = None) -> None:
         self._backend = backend if backend is not None else InMemoryFeishuTokenCache()
         self._namespace: ContextVar[str | None] = ContextVar(
             "feishu_tenant_token_namespace",
@@ -115,7 +122,7 @@ def default_feishu_tenant_token_cache() -> FeishuTenantTokenCache:
 
 
 def resolve_feishu_tenant_token_cache(
-    cache: ICache | FeishuTenantTokenCache | None,
+    cache: TokenCache | FeishuTenantTokenCache | None,
 ) -> FeishuTenantTokenCache:
     """Return an adapter, using a supplied SDK cache as its backend."""
     if cache is None:

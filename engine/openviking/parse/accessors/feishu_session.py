@@ -8,11 +8,10 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Generator, Optional
 from urllib.parse import urlparse
 
-from lark_oapi.core.cache import ICache
-
 from openviking_cli.utils.config.parser_config import FeishuConfig
 
 from .feishu_token import (
+    TokenCache,
     resolve_feishu_tenant_token_cache,
 )
 
@@ -53,7 +52,7 @@ class FeishuApiSession:
         self,
         context: FeishuAccessContext,
         *,
-        tenant_token_cache: ICache | None = None,
+        tenant_token_cache: TokenCache | None = None,
     ):
         self.context = context
         self._clients: dict[bool, Any] = {}
