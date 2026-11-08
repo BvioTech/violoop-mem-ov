@@ -20,7 +20,10 @@ def environment():
     return env
 def run(*args, cwd=ROOT, **kwargs):
     print('+', ' '.join(str(a) for a in args), flush=True)
-    return subprocess.run([str(a) for a in args], cwd=cwd, env=kwargs.pop("env", environment()), check=True, **kwargs)
+    env = kwargs.pop("env", environment())
+    command = [str(a) for a in args]
+    command[0] = shutil.which(command[0], path=env.get('PATH')) or command[0]
+    return subprocess.run(command, cwd=cwd, env=env, check=True, **kwargs)
 def require_node():
     result = run('node', '-p', 'process.versions.node.split(".")[0]', capture_output=True, text=True)
     if result.stdout.strip() != '24': raise SystemExit('Use Node.js 24 (native SQLite ABI).')
