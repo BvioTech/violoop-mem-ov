@@ -19,7 +19,8 @@ def environment():
     if sys.platform == 'darwin':
         env.setdefault('MACOSX_DEPLOYMENT_TARGET', '14.4')
     env.update(OPENVIKING_VERSION=VERSION, SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPENVIKING=VERSION,
-               OV_SKIP_STUDIO_BUILD='1', PYTHONPATH=str(ENGINE), PYTHONDONTWRITEBYTECODE='1')
+               OV_SKIP_STUDIO_BUILD='1', PYTHONPATH=str(ENGINE), PYTHONDONTWRITEBYTECODE='1',
+               PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
     return env
 def run(*args, cwd=ROOT, **kwargs):
     print('+', ' '.join(str(a) for a in args), flush=True)

@@ -53,6 +53,12 @@ class BuildCommandTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             run('violoop-no-such-build-command', capture_output=True, text=True)
 
+    def test_python_build_logs_support_unicode_with_legacy_parent_encoding(self):
+        with patch.dict(os.environ, PYTHONIOENCODING='cp1252', PYTHONUTF8='0'):
+            result = run(Path(sys.executable), '-c', 'print(chr(0x1f517))',
+                         capture_output=True, encoding='utf-8')
+        self.assertEqual(result.stdout.strip(), chr(0x1f517))
+
 
 class MacBuildTargetTests(unittest.TestCase):
     def test_child_environment_defaults_to_desktop_macos_requirement(self):
