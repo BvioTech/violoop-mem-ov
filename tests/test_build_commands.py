@@ -1,14 +1,16 @@
 """Exercise build commands as real child processes, including Windows shims."""
 from pathlib import Path
+import ast
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from common import run
+from common import ROOT, environment, run
 
 
 class BuildCommandTests(unittest.TestCase):
@@ -50,6 +52,50 @@ class BuildCommandTests(unittest.TestCase):
     def test_missing_command_still_raises_file_not_found(self):
         with self.assertRaises(FileNotFoundError):
             run('violoop-no-such-build-command', capture_output=True, text=True)
+
+
+class MacBuildTargetTests(unittest.TestCase):
+    def test_child_environment_defaults_to_desktop_macos_requirement(self):
+        with patch('common.sys.platform', 'darwin'), patch.dict(os.environ):
+            os.environ.pop('MACOSX_DEPLOYMENT_TARGET', None)
+            self.assertEqual(environment()['MACOSX_DEPLOYMENT_TARGET'], '14.4')
+
+    def test_child_environment_preserves_explicit_macos_target(self):
+        with patch('common.sys.platform', 'darwin'), patch.dict(
+                os.environ, MACOSX_DEPLOYMENT_TARGET='15.0'):
+            self.assertEqual(environment()['MACOSX_DEPLOYMENT_TARGET'], '15.0')
+
+    def cmake_command(self):
+        # Exercise the real CMake invocation without running setup() or compiling.
+        tree = ast.parse((ROOT / 'engine/setup.py').read_text(encoding='utf-8'))
+        method = next(node for node in ast.walk(tree)
+                      if isinstance(node, ast.FunctionDef)
+                      and node.name == '_build_extension_impl')
+        namespace = dict(Path=Path, os=os, sysconfig=__import__('sysconfig'),
+                         sys=SimpleNamespace(platform='darwin', executable=sys.executable),
+                         ENGINE_SOURCE_DIR=str(ROOT / 'engine/src'),
+                         ENGINE_BUILD_CONFIG=SimpleNamespace(cmake_variants=()),
+                         C_COMPILER_PATH='cc', CXX_COMPILER_PATH='c++')
+        exec(compile(ast.Module(body=[method], type_ignores=[]),
+                     'engine/setup.py', 'exec'), namespace)
+        calls = []
+        builder = SimpleNamespace(cmake_executable='cmake', spawn=calls.append,
+                                  extensions=[SimpleNamespace(name='_native')],
+                                  get_ext_filename=lambda name: '_native.abi3.so')
+        with tempfile.TemporaryDirectory(prefix='violoop cmake ') as temp:
+            output = Path(temp) / '_native.abi3.so'
+            namespace['_build_extension_impl'](builder, output, output.parent,
+                                               output.parent / 'build')
+        return calls[0]
+
+    def test_cmake_defaults_to_supported_macos_target(self):
+        with patch.dict(os.environ):
+            os.environ.pop('MACOSX_DEPLOYMENT_TARGET', None)
+            self.assertIn('-DCMAKE_OSX_DEPLOYMENT_TARGET=14.4', self.cmake_command())
+
+    def test_cmake_honors_explicit_target_used_by_rust(self):
+        with patch.dict(os.environ, MACOSX_DEPLOYMENT_TARGET='15.0'):
+            self.assertIn('-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0', self.cmake_command())
 
 
 if __name__ == '__main__':

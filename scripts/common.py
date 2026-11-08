@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+import sys
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / 'engine'
 VENV = ROOT / '.venv'
@@ -15,6 +16,8 @@ def environment():
     if (ROOT / '.build-tools/rustup').exists():
         env['RUSTUP_HOME'] = str(ROOT / '.build-tools/rustup')
         env['CARGO_HOME'] = str(ROOT / '.build-tools/cargo')
+    if sys.platform == 'darwin':
+        env.setdefault('MACOSX_DEPLOYMENT_TARGET', '14.4')
     env.update(OPENVIKING_VERSION=VERSION, SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPENVIKING=VERSION,
                OV_SKIP_STUDIO_BUILD='1', PYTHONPATH=str(ENGINE), PYTHONDONTWRITEBYTECODE='1')
     return env

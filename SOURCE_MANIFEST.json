@@ -20566,12 +20566,13 @@
           "path": "setup.py",
           "sha256": "11557832a46e17005f21913870471b308f3624147a952a1eb954c61f1aba3c05",
           "destination": "engine/setup.py",
-          "integration_sha256": "c3aed8de0da36b7262a42ffee3ddcacb2b1c00dee90a80fa599c2993af0850e2"
+          "integration_sha256": "f84644c03b943a07842b6c8b7464beee92e5319cf860693c59f758e3fdf774dc"
         },
         {
           "path": "src/CMakeLists.txt",
           "sha256": "760c3755e8936abcdaaa86450b0eac0ee703eb2a72b32f5335a5a28b41b26e60",
-          "destination": "engine/src/CMakeLists.txt"
+          "destination": "engine/src/CMakeLists.txt",
+          "integration_sha256": "5dd8b9877020b627b4df2a67d5a3fdde7671f402730d27a5bdadb9fba08962e1"
         },
         {
           "path": "src/abi3_engine_backend.cpp",
