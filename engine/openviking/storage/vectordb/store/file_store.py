@@ -1,10 +1,10 @@
 # Copyright (c) 2026 Beijing Volcano Engine Technology Co., Ltd.
 # SPDX-License-Identifier: AGPL-3.0
-import os
 from pathlib import Path
 from typing import Optional
 
 from openviking.storage.vectordb.store.store import IKVStore
+from openviking.storage.vectordb.utils.file_utils import atomic_write_bytes
 from openviking_cli.utils.logger import default_logger as logger
 
 
@@ -91,41 +91,18 @@ class FileStore(IKVStore):
         Returns:
             bool: Returns True on success, False on failure
         """
-        tmp_path = None
         try:
             path = self._validate_path(key)
             # Ensure parent directory exists
             path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Atomic write: write to temp file then rename
-            tmp_path = path.with_suffix(path.suffix + ".tmp")
-
-            # Open temp file in binary write mode
-            with open(tmp_path, "wb") as f:
-                # Write binary data
-                f.write(value)
-                f.flush()
-                os.fsync(f.fileno())
-
-            # Atomic replace
-            os.replace(tmp_path, path)
+            atomic_write_bytes(path, value)
             return True
         except PermissionError:
             logger.error(f"Permission denied writing file: {key}")
-            if tmp_path and tmp_path.exists():
-                try:
-                    tmp_path.unlink()
-                except Exception:
-                    pass
             return False
         except OSError as e:
             # Handle disk full, path too long, and other system errors
             logger.error(f"OS error writing file {key}: {e}")
-            if tmp_path and tmp_path.exists():
-                try:
-                    tmp_path.unlink()
-                except Exception:
-                    pass
             return False
         except ValueError as e:
             # Path validation failed
@@ -133,11 +110,6 @@ class FileStore(IKVStore):
             return False
         except Exception as e:
             logger.error(f"Unexpected error writing file {key}: {e}")
-            if tmp_path and tmp_path.exists():
-                try:
-                    tmp_path.unlink()
-                except Exception:
-                    pass
             return False
 
     def delete(self, key: str) -> bool:

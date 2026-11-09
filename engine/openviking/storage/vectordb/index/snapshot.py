@@ -10,6 +10,8 @@ import struct
 import tempfile
 from pathlib import Path
 
+from openviking.storage.vectordb.utils.file_utils import atomic_write_bytes
+
 
 class InvalidSnapshot(ValueError):
     pass
@@ -127,7 +129,6 @@ def publish_snapshot(engine, version_dir: Path) -> int:
     checkpoint. No caller may prune the delta log before this returns.
     """
     staging = Path(tempfile.mkdtemp(prefix=".pending-", dir=version_dir))
-    temporary_marker = None
     marker = None
     published_directory = None
     try:
@@ -153,14 +154,13 @@ def publish_snapshot(engine, version_dir: Path) -> int:
         os.rename(staging, destination)
         published_directory = destination
         sync_directory(version_dir)
-        fd, name = tempfile.mkstemp(prefix=".commit-", dir=version_dir)
-        temporary_marker = Path(name)
-        with os.fdopen(fd, "w") as stream:
-            json.dump(manifest, stream, sort_keys=True)
-            stream.flush()
-            os.fsync(stream.fileno())
         marker = version_dir / f"{version}.write_done"
-        os.replace(temporary_marker, marker)
+        atomic_write_bytes(
+            marker,
+            json.dumps(manifest, sort_keys=True).encode(),
+            tmp_dir=version_dir,
+            tmp_prefix=".commit-",
+        )
         sync_directory(version_dir)
         sync_directory(version_dir.parent)
         sync_directory(version_dir.parent.parent)
@@ -176,5 +176,3 @@ def publish_snapshot(engine, version_dir: Path) -> int:
     finally:
         if staging.exists():
             shutil.rmtree(staging)
-        if temporary_marker is not None:
-            temporary_marker.unlink(missing_ok=True)
