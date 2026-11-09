@@ -3,6 +3,8 @@ from common import ROOT, ENGINE, PYTHON, run
 if not PYTHON.exists(): raise SystemExit('Run npm run setup first.')
 run(PYTHON, '-m', 'unittest', 'tests.session.test_graph_completion', cwd=ENGINE)
 run(PYTHON, '-m', 'pytest', '-o', 'addopts=',
+    'tests/vectordb/test_index_snapshot_recovery.py',
+    'tests/vectordb/test_crash_recovery.py',
     'tests/session/memory/test_legacy_migration_sources.py',
     'tests/session/memory/test_extraction_output_protocol.py',
     'tests/session/memory/test_legacy_migration_embedding.py',

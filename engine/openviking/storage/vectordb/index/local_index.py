@@ -4,12 +4,21 @@ import json
 import math
 import os
 import shutil
+import tempfile
+import threading
 import time
+from itertools import islice
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple, Union
 
 import openviking.storage.vectordb.engine as engine
 from openviking.storage.vectordb.index.index import IIndex
+from openviking.storage.vectordb.index.snapshot import (
+    InvalidSnapshot,
+    publish_snapshot,
+    sync_directory,
+    validate_snapshot,
+)
 from openviking.storage.vectordb.store.data import CandidateData, DeltaRecord
 from openviking.storage.vectordb.utils.constants import IndexFileMarkers
 from openviking.storage.vectordb.utils.data_processor import DataProcessor
@@ -20,7 +29,6 @@ from openviking.storage.vectordb.utils.path_safety import (
 )
 from openviking.storage.vectordb.utils.validation import fix_fields_data, validate_name_str
 from openviking_cli.utils.logger import default_logger as logger
-
 
 
 def normalize_vector(vector: List[float]) -> List[float]:
@@ -696,39 +704,68 @@ class PersistentIndex(LocalIndex):
                - Load the latest version
                - Apply any pending delta updates from collection
         """
+        source_available = cands_list is not None
         if cands_list is None:
             cands_list = ()
-
+        self._snapshot_lock = threading.RLock()
+        self._snapshot_cache = {}
         validate_name_str(name)
         self.index_dir = str(safe_join_name(path, name))
         os.makedirs(self.index_dir, exist_ok=True)
         self.version_dir = str(safe_join(self.index_dir, "versions"))
         os.makedirs(self.version_dir, exist_ok=True)
 
-        newest_version = self.get_newest_version()
+        # A missing completion marker can itself be the result of an interrupted
+        # directory commit. A newer numeric directory therefore also requires
+        # recovery from records rather than trusting an older delta watermark.
+        snapshots = sorted(
+            (int(p.name) for p in Path(self.version_dir).iterdir()
+             if p.is_dir() and p.name.isdigit()), reverse=True,
+        )
+        valid = self._valid_versions()
+        corrupt_latest = bool(snapshots and (not valid or snapshots[0] != valid[0]))
+        if corrupt_latest:
+            if not source_available:
+                raise RuntimeError("Corrupt index checkpoint requires the authoritative record store")
+            # The delta log may already have been pruned at the bad checkpoint's
+            # watermark. Loading an older index and replaying only surviving
+            # deltas would silently lose updates. Rebuild from current records.
+            logger.warning("Corrupt checkpoint for index '%s'; rebuilding from record store", name)
+        if force_rebuild or corrupt_latest:
+            self._archive_snapshots()
+            valid = []
 
         # At this point, there is no index, need to create a new one
-        if not newest_version or force_rebuild:
-            # Building a new native index needs both len() and another pass when
-            # initializing an optional dense shadow.  Recovery of an existing
-            # snapshot stays single-pass and does not take this fallback.
-            if not isinstance(cands_list, list):
-                cands_list = list(cands_list)
+        if not valid:
             self._create_new_index(name, meta, cands_list, initial_timestamp)
         else:
-            self.now_version = str(newest_version)
+            self.now_version = str(valid[0])
 
         index_path = str(safe_join(self.version_dir, self.now_version))
-        super().__init__(
-            index_path,
-            meta,
-        )
+        try:
+            super().__init__(index_path, meta)
+        except RuntimeError:
+            if not valid or not source_available:
+                raise
+            logger.exception("Cannot load index '%s'; rebuilding from record store", name)
+            self._archive_snapshots()
+            self._create_new_index(name, meta, cands_list, initial_timestamp)
+            super().__init__(str(safe_join(self.version_dir, self.now_version)), meta)
+
+    def _archive_snapshots(self):
+        """Preserve corrupt checkpoints and previous versions for investigation."""
+        archive = Path(tempfile.mkdtemp(prefix="snapshot-recovery-", dir=self.index_dir))
+        os.rename(self.version_dir, archive / "versions")
+        sync_directory(archive)
+        os.makedirs(self.version_dir)
+        sync_directory(Path(self.index_dir))
+        self._snapshot_cache.clear()
 
     def _create_new_index(
         self,
         name: str,
         meta: Any,
-        cands_list: List[CandidateData],
+        cands_list: Iterable[CandidateData],
         initial_timestamp: Optional[int] = None,
     ):
         """Create a new index from scratch."""
@@ -737,26 +774,20 @@ class PersistentIndex(LocalIndex):
         normalize_vector_flag = meta.inner_meta.get("VectorIndex", {}).get("NormalizeVector", False)
 
         version_int = initial_timestamp if initial_timestamp is not None else int(time.time_ns())
-        version_str = str(version_int)
         index_config_dict = meta.get_build_index_dict()
-        index_config_dict["VectorIndex"]["ElementCount"] = len(cands_list)
-        index_config_dict["VectorIndex"]["MaxElementCount"] = len(cands_list)
+        index_config_dict["VectorIndex"]["ElementCount"] = 0
+        index_config_dict["VectorIndex"]["MaxElementCount"] = 0
         index_config_dict["UpdateTimeStamp"] = version_int
         index_config_json = json.dumps(index_config_dict)
 
         builder = IndexEngineProxy(index_config_json, normalize_vector_flag)
-        build_index_path = str(safe_join(self.version_dir, version_str))
-        builder.add_data(self._convert_candidate_list_for_index(cands_list))
-
-        dump_version_int = builder.dump(build_index_path)
-        if dump_version_int > 0:
-            dump_version_str = str(dump_version_int)
-            new_index_path = str(safe_join(self.version_dir, dump_version_str))
-            shutil.move(build_index_path, new_index_path)
-            Path(new_index_path + IndexFileMarkers.WRITE_DONE.value).touch()
-            self.now_version = dump_version_str
-        else:
-            raise Exception("create {} index failed".format(name))
+        try:
+            candidates = iter(cands_list)
+            while batch := list(islice(candidates, 1000)):
+                builder.add_data(self._convert_candidate_list_for_index(batch))
+            self.now_version = str(publish_snapshot(builder, Path(self.version_dir)))
+        finally:
+            builder.drop()
 
     def close(self):
         """Close the index and persist final state.
@@ -764,29 +795,24 @@ class PersistentIndex(LocalIndex):
         Performs a graceful shutdown of the persistent index:
         1. Persists any uncommitted changes to disk
         2. Releases the index engine resources
-        3. Cleans up old version files, keeping only the latest
+        3. Keeps the two newest validated checkpoints
 
         This ensures data durability and proper resource cleanup.
         After close(), the index cannot be used for further operations.
         """
 
-        # 1. Persist latest data first
-        self.persist()
-
-        # 2. Release engine_proxy
-        if self.engine_proxy:
-            self.engine_proxy.drop()
-            self.engine_proxy = None
-
-        # 3. After engine is released, clean redundant index files, keeping only the latest version
-        try:
-            newest_version = self.get_newest_version()
-            if newest_version > 0:
-                self._clean_index([str(newest_version)])
-        except Exception as e:
-            logger.error(f"Failed to clean index files during close: {e}")
-
-        super().close()
+        with self._snapshot_lock:
+            self.persist()
+            if self.engine_proxy:
+                self.engine_proxy.drop()
+                self.engine_proxy = None
+            try:
+                valid = self._valid_versions()
+                if valid:
+                    self._clean_index([str(version) for version in valid[:2]])
+            except Exception as e:
+                logger.error(f"Failed to clean index files during close: {e}")
+            super().close()
 
     def persist(self) -> int:
         """Persist index data to disk as a new version.
@@ -807,31 +833,24 @@ class PersistentIndex(LocalIndex):
             1. Check if index has been modified (update_ts > newest_version)
             2. If modified:
                - Dump index to new timestamped directory
-               - Mark snapshot as complete with .write_done file
-               - Clean up old versions (keeps current and new)
+               - Flush data and directories before publishing a checksummed .write_done
+               - Keep the two newest validated checkpoints
             3. If not modified, return 0 (no-op)
 
         Note:
             This operation is expensive and should not be called too frequently.
             The collection layer schedules periodic persistence.
         """
-        if self.engine_proxy:
-            newest_version = int(self.get_newest_version())
-            update_ts = self.engine_proxy.get_update_ts()
-            if update_ts <= newest_version:
-                return 0
-            now_ns_ts = str(int(time.time_ns()))
-            index_path = str(safe_join(self.version_dir, now_ns_ts))
-            os.makedirs(index_path, exist_ok=True)
-            dump_version = self.engine_proxy.dump(index_path)
-            if dump_version < 0:
-                return 0
-            # todo get dump timestamp
-            dump_index_path = str(safe_join(self.version_dir, str(dump_version)))
-            shutil.move(index_path, dump_index_path)
-            Path(dump_index_path + ".write_done").touch()
-            self._clean_index([self.now_version, str(dump_version)])
-            return dump_version
+        with self._snapshot_lock:
+            if self.engine_proxy:
+                newest_version = self.get_newest_version()
+                update_ts = self.engine_proxy.get_update_ts()
+                if update_ts <= newest_version:
+                    return 0
+                dump_version = publish_snapshot(self.engine_proxy, Path(self.version_dir))
+                valid = self._valid_versions()
+                self._clean_index([str(version) for version in valid[:2]])
+                return dump_version
         return 0
 
     def _clean_index(self, not_clean: List[str]):
@@ -860,6 +879,10 @@ class PersistentIndex(LocalIndex):
                     shutil.rmtree(path)
                 else:
                     os.remove(path)
+        self._snapshot_cache = {
+            path: signature for path, signature in self._snapshot_cache.items()
+            if path.name in not_clean_set
+        }
 
     def get_newest_version(self) -> int:
         """Find the latest valid index version on disk.
@@ -870,17 +893,17 @@ class PersistentIndex(LocalIndex):
         Returns:
             int: Timestamp of the newest valid version, or 0 if no valid versions exist.
 
-        A version is considered valid if:
-        - It has a corresponding .write_done marker file
-        - The version directory exists
-        - The version number is a valid integer timestamp
-
-        Invalid or incomplete versions (without .write_done) are ignored.
+        Native files must be structurally valid. New completion manifests also
+        verify file sizes and checksums; legacy empty markers remain readable.
         """
-        if not os.path.exists(self.version_dir):
-            return 0
+        with self._snapshot_lock:
+            valid = self._valid_versions()
+            return valid[0] if valid else 0
 
-        valid_versions = []
+    def _completed_versions(self) -> List[int]:
+        if not os.path.exists(self.version_dir):
+            return []
+        completed = []
         for name in os.listdir(self.version_dir):
             version_path = safe_join(self.version_dir, name)
             # Must be a directory
@@ -896,12 +919,20 @@ class PersistentIndex(LocalIndex):
             if not marker_path.exists():
                 continue
 
-            valid_versions.append(int(name))
+            completed.append(int(name))
+        return sorted(completed, reverse=True)
 
-        if not valid_versions:
-            return 0
-
-        return max(valid_versions)
+    def _valid_versions(self) -> List[int]:
+        valid = []
+        for version in self._completed_versions():
+            path = Path(self.version_dir) / str(version)
+            marker = Path(f"{path}{IndexFileMarkers.WRITE_DONE.value}")
+            try:
+                validate_snapshot(path, marker, self._snapshot_cache)
+                valid.append(version)
+            except InvalidSnapshot as exc:
+                logger.warning("Skipping invalid checkpoint for index %s: %s", self.index_dir, exc)
+        return valid
 
     def drop(self):
         """Permanently delete the index and all its versions.

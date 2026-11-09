@@ -19281,7 +19281,7 @@
           "path": "openviking/storage/vectordb/index/local_index.py",
           "sha256": "80c763b488f68709914e3c250c48cf77b299252e1af35043f4e77778b98a6ea2",
           "destination": "engine/openviking/storage/vectordb/index/local_index.py",
-          "integration_sha256": "06f90842254237990526aeb636b48e0867c412b3113a79a3f8cee28ff333115a"
+          "integration_sha256": "5a04f3092cb7d959c888df8bdb84ed962ad594ee0b6d270b2e74421120fedc9a"
         },
         {
           "path": "openviking/storage/vectordb/meta/__init__.py",
@@ -31754,6 +31754,14 @@
     {
       "date": "2026-10-27",
       "description": "Isolate direct MCP test telemetry and await owned background indexing and task monitors before service teardown."
+    },
+    {
+      "paths": [
+        "engine/openviking/storage/vectordb/index/local_index.py",
+        "engine/openviking/storage/vectordb/index/snapshot.py",
+        "engine/tests/vectordb/test_index_snapshot_recovery.py"
+      ],
+      "purpose": "Durable checksummed index checkpoints and lossless record-store rebuild after an interrupted or corrupt checkpoint, including recovery after delta-log pruning."
     }
   ],
   "retained_files": [
