@@ -19218,7 +19218,7 @@
           "path": "openviking/storage/vectordb/collection/local_collection.py",
           "sha256": "9f180a14305f7f9d2ec2b369103008040e596c1af0164c3b951f9e50a44a62b1",
           "destination": "engine/openviking/storage/vectordb/collection/local_collection.py",
-          "integration_sha256": "6c2b9a688291db9c2c294394a418a1b476cab8529810521ce27a0e7366b7c566"
+          "integration_sha256": "08f4cf4620eace3fe9417cfd3f79c3ae97e1e0a250f1e0441ba9dd727e2959d1"
         },
         {
           "path": "openviking/storage/vectordb/collection/result.py",
@@ -19281,7 +19281,7 @@
           "path": "openviking/storage/vectordb/index/local_index.py",
           "sha256": "80c763b488f68709914e3c250c48cf77b299252e1af35043f4e77778b98a6ea2",
           "destination": "engine/openviking/storage/vectordb/index/local_index.py",
-          "integration_sha256": "5a04f3092cb7d959c888df8bdb84ed962ad594ee0b6d270b2e74421120fedc9a"
+          "integration_sha256": "11ece977b582ed86f6f3ff70a397401c6de9b4f135e7af0ff2eebbaea2642276"
         },
         {
           "path": "openviking/storage/vectordb/meta/__init__.py",
@@ -19391,7 +19391,8 @@
         {
           "path": "openviking/storage/vectordb/store/file_store.py",
           "sha256": "0dc7d483a39700c99ec8c4bffbf1f326c9469a7f5d19c83c00a72bbef4e82295",
-          "destination": "engine/openviking/storage/vectordb/store/file_store.py"
+          "destination": "engine/openviking/storage/vectordb/store/file_store.py",
+          "integration_sha256": "bbc5c04c41d732fbb478624c3118fabe425d3343a383a2549f1faa1ec041fb03"
         },
         {
           "path": "openviking/storage/vectordb/store/local_store.py",
@@ -19451,7 +19452,8 @@
         {
           "path": "openviking/storage/vectordb/utils/file_utils.py",
           "sha256": "846ce7db62acd871b18079e243da8f7d83140c536c78b14bf31f21f46bab3b63",
-          "destination": "engine/openviking/storage/vectordb/utils/file_utils.py"
+          "destination": "engine/openviking/storage/vectordb/utils/file_utils.py",
+          "integration_sha256": "0b0dcc710156eea9a17b04a87e1152b448f6b424cd77b44abf9172c862a48ae3"
         },
         {
           "path": "openviking/storage/vectordb/utils/id_generator.py",
