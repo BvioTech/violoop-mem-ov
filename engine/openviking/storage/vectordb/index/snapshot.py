@@ -106,6 +106,20 @@ def validate_snapshot(path: Path, marker: Path, cache: dict) -> None:
         raise InvalidSnapshot(f"Invalid checkpoint {path}: {exc}") from exc
 
 
+def cleanup_orphaned_staging(version_dir: Path) -> None:
+    """Remove staging artifacts left behind by a publish_snapshot that never finished.
+
+    A ".pending-*" directory or ".commit-*" file only exists while publish_snapshot
+    is running and is removed before it returns (success or failure), so any found
+    on disk belong to an attempt interrupted by a crash and are safe to discard.
+    """
+    for entry in version_dir.iterdir():
+        if entry.name.startswith(".pending-"):
+            shutil.rmtree(entry, ignore_errors=True)
+        elif entry.name.startswith(".commit-"):
+            entry.unlink(missing_ok=True)
+
+
 def publish_snapshot(engine, version_dir: Path) -> int:
     """Data fsync -> directory fsync -> rename -> durable completion manifest.
 

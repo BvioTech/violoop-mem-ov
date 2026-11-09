@@ -15,6 +15,7 @@ import openviking.storage.vectordb.engine as engine
 from openviking.storage.vectordb.index.index import IIndex
 from openviking.storage.vectordb.index.snapshot import (
     InvalidSnapshot,
+    cleanup_orphaned_staging,
     publish_snapshot,
     sync_directory,
     validate_snapshot,
@@ -714,6 +715,7 @@ class PersistentIndex(LocalIndex):
         os.makedirs(self.index_dir, exist_ok=True)
         self.version_dir = str(safe_join(self.index_dir, "versions"))
         os.makedirs(self.version_dir, exist_ok=True)
+        cleanup_orphaned_staging(Path(self.version_dir))
 
         # A missing completion marker can itself be the result of an interrupted
         # directory commit. A newer numeric directory therefore also requires
