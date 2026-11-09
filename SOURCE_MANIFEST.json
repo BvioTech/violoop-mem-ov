@@ -4717,7 +4717,8 @@
         {
           "path": "crates/ragfs/src/lock/provider.rs",
           "sha256": "9d92c054ebad1577f36fe0e195bf0a3736023c394d7b31cb568cb25420cbcf6b",
-          "destination": "engine/crates/ragfs/src/lock/provider.rs"
+          "destination": "engine/crates/ragfs/src/lock/provider.rs",
+          "integration_sha256": "136a7cefb73d08e13db06fd7030c3575e80c915c0ea89dcd16a217d0656e9301"
         },
         {
           "path": "crates/ragfs/src/lock/resolver.rs",
@@ -4777,7 +4778,8 @@
         {
           "path": "crates/ragfs/src/plugins/localfs/mod.rs",
           "sha256": "518636c210a2fe9503df1ace00b1e41813fb2039fbc6282e39f1a01c7a117a72",
-          "destination": "engine/crates/ragfs/src/plugins/localfs/mod.rs"
+          "destination": "engine/crates/ragfs/src/plugins/localfs/mod.rs",
+          "integration_sha256": "47510f4a59faeca50e3efd69874b6abe746874b2a84240412f5ffe994378e255"
         },
         {
           "path": "crates/ragfs/src/plugins/memfs/mod.rs",
