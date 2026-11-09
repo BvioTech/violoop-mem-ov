@@ -146,8 +146,9 @@ async function start(config, { runtimeOptions } = {}) {
     shutdownPromise = Promise.allSettled([
       closingApp.finally(() => runtime?.stop()), ...closingServers,
     ]).then(results => {
-      const failure = results.find(result => result.status === 'rejected')
-      if (failure) throw failure.reason
+      const failures = results.filter(result => result.status === 'rejected').map(result => result.reason)
+      if (failures.length === 1) throw failures[0]
+      if (failures.length > 1) throw new AggregateError(failures, 'Multiple errors during shutdown')
     }).finally(() => {
       clearTimeout(timer)
       process.removeListener('SIGTERM', shutdown)
