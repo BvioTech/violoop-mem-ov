@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+import sys
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = ROOT / 'engine'
 VENV = ROOT / '.venv'
@@ -15,12 +16,21 @@ def environment():
     if (ROOT / '.build-tools/rustup').exists():
         env['RUSTUP_HOME'] = str(ROOT / '.build-tools/rustup')
         env['CARGO_HOME'] = str(ROOT / '.build-tools/cargo')
+    if sys.platform == 'darwin':
+        env.setdefault('MACOSX_DEPLOYMENT_TARGET', '14.4')
     env.update(OPENVIKING_VERSION=VERSION, SETUPTOOLS_SCM_PRETEND_VERSION_FOR_OPENVIKING=VERSION,
-               OV_SKIP_STUDIO_BUILD='1', PYTHONPATH=str(ENGINE), PYTHONDONTWRITEBYTECODE='1')
+               OV_SKIP_STUDIO_BUILD='1', PYTHONPATH=str(ENGINE), PYTHONDONTWRITEBYTECODE='1',
+               PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
     return env
 def run(*args, cwd=ROOT, **kwargs):
     print('+', ' '.join(str(a) for a in args), flush=True)
-    return subprocess.run([str(a) for a in args], cwd=cwd, env=kwargs.pop("env", environment()), check=True, **kwargs)
+    env = kwargs.pop('env', environment())
+    command = [str(a) for a in args]
+    if os.name == 'nt':
+        # CreateProcess does not resolve npm.cmd or search the child's PATH.
+        path = env.get('PATH') if env is not None else None
+        command[0] = shutil.which(command[0], path=path) or command[0]
+    return subprocess.run(command, cwd=cwd, env=env, check=True, **kwargs)
 def require_node():
     result = run('node', '-p', 'process.versions.node.split(".")[0]', capture_output=True, text=True)
     if result.stdout.strip() != '24': raise SystemExit('Use Node.js 24 (native SQLite ABI).')
