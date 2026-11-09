@@ -802,7 +802,10 @@ class PersistentIndex(LocalIndex):
         """
 
         with self._snapshot_lock:
-            self.persist()
+            try:
+                self.persist()
+            except Exception as e:
+                logger.error(f"Failed to persist index during close: {e}")
             if self.engine_proxy:
                 self.engine_proxy.drop()
                 self.engine_proxy = None
