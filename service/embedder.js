@@ -196,11 +196,15 @@ class Embedder {
       // Optional dependency — absent on platforms without prebuilds.
       const { getLlama, LlamaLogLevel } = await import('node-llama-cpp')
       const llama = await getLlama({ logLevel: LlamaLogLevel.error, ...(this.cpuOnly ? { gpu: false } : {}) })
+      const identity = require('./model_file_identity').identity
+      const loadedFile = identity(fs.statSync(modelPath))
       const model = await llama.loadModel({ modelPath })
       this._model = model
       this._ctx = await model.createEmbeddingContext(this.threads === undefined ? {} : { threads: this.threads })
       const probe = await this._ctx.getEmbeddingFor(this.profile.doc('none', 'probe'))
       this.dim = probe.vector.length
+      if (identity(fs.statSync(modelPath)) !== loadedFile) throw Error('model_file_changed_during_load')
+      this.modelFileIdentity = loadedFile
       this.modelPath = modelPath
       this.state = 'ready'
       _activeCal = this.profile.cal // 标定刻度跟随已加载的模型

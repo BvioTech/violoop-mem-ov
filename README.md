@@ -13,7 +13,7 @@
 
 ## 安装
 
-需要 Node.js 24、uv、C/C++ 编译工具（macOS Xcode Command Line Tools；Linux 的编译器和开发头文件）。Rust 可以使用本机版本（>=1.91.1），或仅安装到本目录的忽略目录：
+需要 Node.js 24、uv、C/C++ 编译工具（macOS Xcode Command Line Tools；Linux 的编译器和开发头文件）。Rust 可以使用本机版本（>=1.94.1），或仅安装到本目录的忽略目录：
 
 ```sh
 npm run setup -- --bootstrap-rust
@@ -39,6 +39,8 @@ npm start -- --data-dir "$PWD/.local/data" --socket "$PWD/.local/mem.sock"
 模型目录需含 `bge-m3-q8_0.gguf`；源码运行也会查找本仓库的 `models/`，无需为该目录设置环境变量。也可用 `--embedding-model /path/to/model.gguf`。模型不随 Git 导入。正式模型调用仍使用 Device 的 `/internal/memory/chat/completions`（默认 `127.0.0.1:9090`），可通过 `OPENVIKING_DEVICE_MODEL_URL` 指定另一个本机 Device 地址。独立测试入口会提供本地确定性模型响应，无需连接真实 Device 或云服务。
 
 普通向量请求保持本地 BGE；迁移向量请求经 Device 的 `/internal/memory/embeddings`，使用当前登录用户自动领取、续期的模型网关凭证调用云端 `bge-m3`。无需单独配置迁移 URL 或密钥文件。
+
+普通召回查询超过 256 字符时，先经同一鉴权通道调用 Device 的 `/internal/memory/retrieval-query`，用云端 Flash 提炼检索要点，再进入本地 BGE 队列。短查询直接向量化。提炼由 Device 缓存、限时，失败不回退到长原文计算；原始记忆内容及文档索引向量不被改写。`bge.request` 日志分别记录原长度、实际向量化长度、提炼、排队和计算耗时。
 
 ## 验证和构建
 

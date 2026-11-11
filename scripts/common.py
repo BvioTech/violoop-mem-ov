@@ -34,6 +34,13 @@ def run(*args, cwd=ROOT, **kwargs):
 def require_node():
     result = run('node', '-p', 'process.versions.node.split(".")[0]', capture_output=True, text=True)
     if result.stdout.strip() != '24': raise SystemExit('Use Node.js 24 (native SQLite ABI).')
+MIN_RUST = (1, 94, 1)
+def cargo_version():
+    env = environment()
+    cargo = shutil.which('cargo', path=env['PATH'])
+    if not cargo: return None
+    result = subprocess.run([cargo, '--version'], env=env, capture_output=True, text=True, check=True)
+    return tuple(int(part) for part in result.stdout.split()[1].split('.')[:3])
 
 def test_environment():
     env = environment()

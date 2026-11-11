@@ -10,10 +10,25 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from common import ROOT, environment, run
+from common import ROOT, cargo_version, environment, run
 
 
 class BuildCommandTests(unittest.TestCase):
+    def test_cargo_version_uses_the_repository_toolchain_environment(self):
+        with tempfile.TemporaryDirectory(prefix='violoop cargo probe ') as temp:
+            command = Path(temp) / ('cargo.cmd' if os.name == 'nt' else 'cargo')
+            if os.name == 'nt':
+                command.write_text('@echo off\nif not "%RUSTUP_HOME%"=="repo-rustup" exit /b 7\n'
+                                   'if not "%CARGO_HOME%"=="repo-cargo" exit /b 8\necho cargo 1.99.1 (probe)\n')
+            else:
+                command.write_text('#!/bin/sh\n[ "$RUSTUP_HOME" = "repo-rustup" ] || exit 7\n'
+                                   '[ "$CARGO_HOME" = "repo-cargo" ] || exit 8\nprintf "cargo 1.99.1 (probe)\\n"\n')
+                command.chmod(0o755)
+            child_env = dict(os.environ, PATH=temp, RUSTUP_HOME='repo-rustup', CARGO_HOME='repo-cargo')
+            with patch.dict(os.environ, RUSTUP_HOME='parent-rustup', CARGO_HOME='parent-cargo'), \
+                    patch('common.environment', return_value=child_env):
+                self.assertEqual(cargo_version(), (1, 99, 1))
+
     def write_command(self, directory, name, *, exit_code=0):
         directory.mkdir(parents=True, exist_ok=True)
         command = directory / (name + '.cmd' if os.name == 'nt' else name)

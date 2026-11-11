@@ -42,7 +42,11 @@ function nativeConfig(config, gatewayUrl, token, engineKey) {
     server: { host: '127.0.0.1', port, workers: 1, auth_mode: 'trusted', root_api_key: engineKey },
     storage: { workspace: path.join(config.dataDir, 'openviking'), vectordb: { backend: 'local' }, agfs: { backend: 'local' } },
     embedding: { dense: { provider: 'openai', api_base: gatewayUrl, api_key: token,
-      model: 'bge-m3', dimension: 1024, input: 'text', encoding_format: 'float' }, max_concurrent: 1, max_retries: 1 },
+      model: 'bge-m3', dimension: 1024, input: 'text', encoding_format: 'float',
+      query_param: 'query', document_param: 'document' },
+      // Allow requests to reach the gateway scheduler; inference itself remains
+      // serial there. A single HTTP slot hides all queries behind background work.
+      max_concurrent: 4, max_retries: 1 },
     vlm: { provider: 'openai', api_base: gatewayUrl, api_key: token, model: 'violoop-memory',
       temperature: 0, max_tokens: config.openviking.llmMaxTokens, max_concurrent: 2, max_retries: 1 },
     memory: { link_enabled: true, custom_templates_dir: path.join(config.openviking.runtimeDir, 'memory-templates') },
@@ -124,6 +128,7 @@ async function startRuntime(config, { spawnProcess = spawn, embedder = new Embed
   if (embedder.ensureLoaded) void embedder.ensureLoaded()
   return {
     engineKey, embedder,
+    createEmbeddingApi: run => require('./embedding_api').createEmbeddingApi({ embedder, gatewayUrl: gateway.url, token, run }),
     async suspend() {
       gateway.setPaused(true)
       await gateway.drain()
