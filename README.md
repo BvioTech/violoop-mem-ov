@@ -40,6 +40,8 @@ npm start -- --data-dir "$PWD/.local/data" --socket "$PWD/.local/mem.sock"
 
 普通向量请求保持本地 BGE；迁移向量请求经 Device 的 `/internal/memory/embeddings`，使用当前登录用户自动领取、续期的模型网关凭证调用云端 `bge-m3`。无需单独配置迁移 URL 或密钥文件。
 
+普通召回查询超过 256 字符时，先经同一鉴权通道调用 Device 的 `/internal/memory/retrieval-query`，用云端 Flash 提炼检索要点，再进入本地 BGE 队列。短查询直接向量化。提炼由 Device 缓存、限时，失败不回退到长原文计算；原始记忆内容及文档索引向量不被改写。`bge.request` 日志分别记录原长度、实际向量化长度、提炼、排队和计算耗时。
+
 ## 验证和构建
 
 ```sh
