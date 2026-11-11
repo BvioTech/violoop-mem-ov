@@ -79,6 +79,14 @@ contents:
     dst: /opt/violoop-mem-ov/openviking_runtime.js
   - src: ./service/model_gateway.js
     dst: /opt/violoop-mem-ov/model_gateway.js
+  - src: ./service/embedding_api.js
+    dst: /opt/violoop-mem-ov/embedding_api.js
+  - src: ./service/embedding_queue.js
+    dst: /opt/violoop-mem-ov/embedding_queue.js
+  - src: ./service/model_file_identity.js
+    dst: /opt/violoop-mem-ov/model_file_identity.js
+  - src: ./service/retrieval_query.js
+    dst: /opt/violoop-mem-ov/retrieval_query.js
   - src: ./service/migration_timing.js
     dst: /opt/violoop-mem-ov/migration_timing.js
   - src: ./service/migration_embedding.js
