@@ -44,6 +44,9 @@ jobs:
       - name: Test real build command processes
         run: python -m unittest discover -s tests -p test_build_commands.py -v
 
+      - name: Memory prefetch query regressions
+        run: python engine/tests/session/memory/test_legacy_migration_query.py
+
       - name: Verify npm can be invoked from Python
         run: python -c "import sys; sys.path.insert(0, 'scripts'); from common import run; run('npm', '--version')"
 
