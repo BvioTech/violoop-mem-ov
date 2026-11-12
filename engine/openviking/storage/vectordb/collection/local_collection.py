@@ -1355,7 +1355,7 @@ class PersistCollection(LocalCollection):
             # If we used the default (current time), the index would ignore older data in the log.
             # Restore each native index from a fresh lazy record stream.
             recovery_candidates = (
-                self.store_mgr.iter_all_cands_data() if self.store_mgr is not None else iter(())
+                self.store_mgr.iter_all_cands_data() if self.store_mgr is not None else None
             )
             index = PersistentIndex(
                 name=index_name,

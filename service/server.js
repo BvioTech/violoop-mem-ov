@@ -76,8 +76,14 @@ async function start(config, { runtimeOptions } = {}) {
       },
     })
   }
+  const embeddings = runtime?.createEmbeddingApi(task => background.run(task))
   const handler = async (req, res) => {
     const route = new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '')
+    if (route === '/models/embeddings') {
+      if (embeddings) return embeddings(req, res)
+      res.writeHead(503, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ error: 'managed_local_embedding_required' }))
+    }
     if (route === '/license') {
       if (req.method !== 'GET') { res.writeHead(405, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ error: { code: 'method_not_allowed', message: 'Method not allowed' } })) }
       res.writeHead(200, { 'content-type': 'application/json' })
@@ -170,8 +176,9 @@ async function start(config, { runtimeOptions } = {}) {
     shutdownPromise = Promise.allSettled([
       closingApp.finally(() => runtime?.stop()), ...closingServers,
     ]).then(results => {
-      const failure = results.find(result => result.status === 'rejected')
-      if (failure) throw failure.reason
+      const failures = results.filter(result => result.status === 'rejected').map(result => result.reason)
+      if (failures.length === 1) throw failures[0]
+      if (failures.length > 1) throw new AggregateError(failures, 'Multiple errors during shutdown')
     }).finally(() => {
       clearTimeout(timer)
       process.removeListener('SIGTERM', shutdown)

@@ -60,7 +60,7 @@
           "path": "embedder.js",
           "sha256": "eccfd770d1f88ac7076045fe0fb9d8473d6c087f29d3a970932848979846313f",
           "destination": "service/embedder.js",
-          "integration_sha256": "21b981b39a8b90857f99fe65534e8a09159bee981539a2935ba68efdf2c02ce2"
+          "integration_sha256": "d1a1f0ab67e321547f504da015a9fc30da6c44c6e3a782edc05152c1b553283f"
         },
         {
           "path": "event_time_decay.js",
@@ -155,7 +155,7 @@
           "path": "openviking_runtime.js",
           "sha256": "ef94ce946ae077b47f6d8847cc440fef49fa1f97a181e5db1255740280435687",
           "destination": "service/openviking_runtime.js",
-          "integration_sha256": "0306e996b08570814d54dfe41b3bb67ee2e7213360829a22fe131e5f01db8513"
+          "integration_sha256": "3300128a64464f29e8dc60c12c2ae11e73efc87c53c37dafc28f46168723a307"
         },
         {
           "path": "openviking_uri.js",
@@ -231,7 +231,7 @@
           "path": "scripts/nfpm.yaml",
           "sha256": "44e2dc5dcaeee141a8ab8ac4e32044ffb005c357da6d414d573654cabedb2789",
           "destination": "scripts/nfpm.yaml",
-          "integration_sha256": "28e9d24b0d45d55901b17e50ca61b50b5ae326d7fff0a0086086041636eed0eb"
+          "integration_sha256": "ebde0df67d55f4a8540caa4ce641950e6ef4a5718cb0e5acfcbaa6ba30651495"
         },
         {
           "path": "scripts/openviking-live-smoke.js",
@@ -243,7 +243,7 @@
           "path": "server.js",
           "sha256": "8d2ce671d5a6074ee28b9e7509092771dbf70b3ec2fbb3a7937d465667941d2a",
           "destination": "service/server.js",
-          "integration_sha256": "e975a6e8d4b76e544012ad97eaa9f8b4a921846d6595088f8cddc0fcf75d2cf7"
+          "integration_sha256": "f2b3c81aa68e2b68e9e24e66a0036e4eb83f227514af381afe61ad73fb7473b7"
         },
         {
           "path": "test/agent_memory.js",
@@ -709,7 +709,7 @@
           "path": "Cargo.lock",
           "sha256": "a9a571f9567ceaee7afab2242dd8b2a7ee00a0283b1521189abe9d9449032792",
           "destination": "engine/Cargo.lock",
-          "integration_sha256": "ee1069efe35bd4adf80f30e93649ae6af4590f994c2dc3405f6b1323a727c9c8"
+          "integration_sha256": "7c76c7ba9e7f59b9854e30bb5d56ac8964b88a073452524aa188f83cb836ff2f"
         },
         {
           "path": "Cargo.toml",
@@ -4091,7 +4091,7 @@
           "path": "crates/ov_cli/Cargo.toml",
           "sha256": "dac172bd46a1ee16d0a9d34c43c4d9b5437b60ed4ac8ad5eb105e2b331688ff4",
           "destination": "engine/crates/ov_cli/Cargo.toml",
-          "integration_sha256": "803b75bae41c7a365bc4c52e1d4abced3330727ee729c7d3e64b39480c76603d"
+          "integration_sha256": "007967a83a85549e41601726ce379b27df42bed2c913edf54bc195864102750e"
         },
         {
           "path": "crates/ov_cli/README.md",
@@ -4372,7 +4372,8 @@
         {
           "path": "crates/ragfs-python/Cargo.toml",
           "sha256": "0814723df7c21a970aad1352b5aeb36bbb647c98aa4bc35c6aeb70a20249e483",
-          "destination": "engine/crates/ragfs-python/Cargo.toml"
+          "destination": "engine/crates/ragfs-python/Cargo.toml",
+          "integration_sha256": "141028ddb5a609e4615a9580dbd50b815ccb459fcf82efdeb50e5dd4d7ef6d4f"
         },
         {
           "path": "crates/ragfs-python/pyproject.toml",
@@ -4382,17 +4383,20 @@
         {
           "path": "crates/ragfs-python/src/git.rs",
           "sha256": "7942a6958f1f5ba4dad3b0f11df3a43bf452074130134c7357145a27eb89073a",
-          "destination": "engine/crates/ragfs-python/src/git.rs"
+          "destination": "engine/crates/ragfs-python/src/git.rs",
+          "integration_sha256": "da25bef4931257406d8bccbe25f8e81c559565a14213f5f3c774eb1311575761"
         },
         {
           "path": "crates/ragfs-python/src/lib.rs",
           "sha256": "fa784a163252a14b3ab0effac3ed9601bceea5b768f32786d2175eda2949c920",
-          "destination": "engine/crates/ragfs-python/src/lib.rs"
+          "destination": "engine/crates/ragfs-python/src/lib.rs",
+          "integration_sha256": "a90922e269dbb18448515fc194dac04e391385f2993a76f949c56c1c3b5b20a6"
         },
         {
           "path": "crates/ragfs/Cargo.toml",
           "sha256": "573c25fb727425678a24b3d8b245e96bc6c59c7a6d6b924d886173868e51a8f0",
-          "destination": "engine/crates/ragfs/Cargo.toml"
+          "destination": "engine/crates/ragfs/Cargo.toml",
+          "integration_sha256": "22c1c5724a499153c68381ac6eff2012d28bbab9d6635bb7fcb886bba5151327"
         },
         {
           "path": "crates/ragfs/ORIGIN.md",
@@ -18588,7 +18592,8 @@
         {
           "path": "openviking/session/memory/session_extract_context_provider.py",
           "sha256": "87efa404a03feb5b93cc53791aa917049b1d32f797e871711de8e38e814a13ec",
-          "destination": "engine/openviking/session/memory/session_extract_context_provider.py"
+          "destination": "engine/openviking/session/memory/session_extract_context_provider.py",
+          "integration_sha256": "64bc225a4507c34bfdad3902f8369c6370619af2e74670330a10e2d19c52e662"
         },
         {
           "path": "openviking/session/memory/streaming_memory_updater.py",
@@ -19220,7 +19225,7 @@
           "path": "openviking/storage/vectordb/collection/local_collection.py",
           "sha256": "9f180a14305f7f9d2ec2b369103008040e596c1af0164c3b951f9e50a44a62b1",
           "destination": "engine/openviking/storage/vectordb/collection/local_collection.py",
-          "integration_sha256": "6c2b9a688291db9c2c294394a418a1b476cab8529810521ce27a0e7366b7c566"
+          "integration_sha256": "08f4cf4620eace3fe9417cfd3f79c3ae97e1e0a250f1e0441ba9dd727e2959d1"
         },
         {
           "path": "openviking/storage/vectordb/collection/result.py",
@@ -19283,7 +19288,7 @@
           "path": "openviking/storage/vectordb/index/local_index.py",
           "sha256": "80c763b488f68709914e3c250c48cf77b299252e1af35043f4e77778b98a6ea2",
           "destination": "engine/openviking/storage/vectordb/index/local_index.py",
-          "integration_sha256": "06f90842254237990526aeb636b48e0867c412b3113a79a3f8cee28ff333115a"
+          "integration_sha256": "11ece977b582ed86f6f3ff70a397401c6de9b4f135e7af0ff2eebbaea2642276"
         },
         {
           "path": "openviking/storage/vectordb/meta/__init__.py",
@@ -19393,7 +19398,8 @@
         {
           "path": "openviking/storage/vectordb/store/file_store.py",
           "sha256": "0dc7d483a39700c99ec8c4bffbf1f326c9469a7f5d19c83c00a72bbef4e82295",
-          "destination": "engine/openviking/storage/vectordb/store/file_store.py"
+          "destination": "engine/openviking/storage/vectordb/store/file_store.py",
+          "integration_sha256": "bbc5c04c41d732fbb478624c3118fabe425d3343a383a2549f1faa1ec041fb03"
         },
         {
           "path": "openviking/storage/vectordb/store/local_store.py",
@@ -19453,7 +19459,8 @@
         {
           "path": "openviking/storage/vectordb/utils/file_utils.py",
           "sha256": "846ce7db62acd871b18079e243da8f7d83140c536c78b14bf31f21f46bab3b63",
-          "destination": "engine/openviking/storage/vectordb/utils/file_utils.py"
+          "destination": "engine/openviking/storage/vectordb/utils/file_utils.py",
+          "integration_sha256": "0b0dcc710156eea9a17b04a87e1152b448f6b424cd77b44abf9172c862a48ae3"
         },
         {
           "path": "openviking/storage/vectordb/utils/id_generator.py",
@@ -20569,12 +20576,13 @@
           "path": "setup.py",
           "sha256": "11557832a46e17005f21913870471b308f3624147a952a1eb954c61f1aba3c05",
           "destination": "engine/setup.py",
-          "integration_sha256": "c3aed8de0da36b7262a42ffee3ddcacb2b1c00dee90a80fa599c2993af0850e2"
+          "integration_sha256": "f84644c03b943a07842b6c8b7464beee92e5319cf860693c59f758e3fdf774dc"
         },
         {
           "path": "src/CMakeLists.txt",
           "sha256": "760c3755e8936abcdaaa86450b0eac0ee703eb2a72b32f5335a5a28b41b26e60",
-          "destination": "engine/src/CMakeLists.txt"
+          "destination": "engine/src/CMakeLists.txt",
+          "integration_sha256": "5dd8b9877020b627b4df2a67d5a3fdde7671f402730d27a5bdadb9fba08962e1"
         },
         {
           "path": "src/abi3_engine_backend.cpp",
@@ -23758,7 +23766,8 @@
         {
           "path": "tests/session/memory/test_legacy_migration_query.py",
           "sha256": "b1b34bddd535981ff2224fe813a6cbaf3812090a24927da2cb6a77d8842a9df8",
-          "destination": "engine/tests/session/memory/test_legacy_migration_query.py"
+          "destination": "engine/tests/session/memory/test_legacy_migration_query.py",
+          "integration_sha256": "314a0244ace27701f887425d5bc59c81fcfa6eda225497dbe127ee33497f903e"
         },
         {
           "path": "tests/session/memory/test_legacy_migration_routing.py",
@@ -27265,7 +27274,7 @@
           "path": "uv.lock",
           "sha256": "e9a11247250cbd291bb55345ebffd24d3049155cfc4c43041ebab73243da03ea",
           "destination": "engine/uv.lock",
-          "integration_sha256": "f1114972654e6b6c273f29093d3e5dfca0a0cadb246f8e75c2ae360dc6c159a2"
+          "integration_sha256": "397968e289f1777f58612d989e9cf43c395ac5c4220e078fc63a262f69b08470"
         },
         {
           "path": "web-studio/.cta.json",
@@ -31757,6 +31766,14 @@
     {
       "date": "2026-10-27",
       "description": "Isolate direct MCP test telemetry and await owned background indexing and task monitors before service teardown."
+    },
+    {
+      "paths": [
+        "engine/openviking/storage/vectordb/index/local_index.py",
+        "engine/openviking/storage/vectordb/index/snapshot.py",
+        "engine/tests/vectordb/test_index_snapshot_recovery.py"
+      ],
+      "purpose": "Durable checksummed index checkpoints and lossless record-store rebuild after an interrupted or corrupt checkpoint, including recovery after delta-log pruning."
     }
   ],
   "retained_files": [

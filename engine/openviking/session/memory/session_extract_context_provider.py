@@ -46,10 +46,12 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-_PREFETCH_SEARCH_QUERY_MAX_CHARS = 5000
-_PREFETCH_SEARCH_TEXT_PART_MAX_CHARS = 1000
-_PREFETCH_SEARCH_ASSISTANT_TEXT_PART_MAX_CHARS = 500
-_PREFETCH_SEARCH_TOOL_FIELD_MAX_CHARS = 500
+_PREFETCH_SEARCH_QUERY_MAX_CHARS = 256
+_PREFETCH_SEARCH_TEXT_PART_MAX_CHARS = 128
+_PREFETCH_SEARCH_MAX_USER_MESSAGES = 3
+# Tagged legacy migration uses a separate embedding route and shares this
+# existing structured-fact budget fairly across its batch of source records.
+_PREFETCH_SEARCH_MIGRATION_QUERY_MAX_CHARS = 5000
 _RESOURCE_REASON_LANGUAGE_RE = re.compile(
     r"(?im)^\s*(?:User reason|用户说明|用户原因|用户理由)[:：]\s*(.+?)\s*$"
 )
@@ -389,53 +391,48 @@ After exploring, analyze the conversation and output ALL memory write/edit/delet
         return normalized[: max_chars - 3].rstrip() + "..."
 
     def _build_prefetch_search_query(self) -> str:
-        """Build a compact semantic query from raw conversation messages.
+        """Recall from recent user intent without embedding execution transcripts.
 
         The LLM already receives the full conversation via pre_fetch_messages.
-        Search only needs topical recall signals, so use the raw message content
-        instead of the prompt-wrapped conversation.
+        Local BGE shares its worker with foreground search, so automatic prefetch
+        must stay small even when assistant reasoning and tool output are huge.
+        A session with no user intent can still use the extraction search tools.
         """
         if not isinstance(self.messages, list):
             return ""
 
         if self.is_legacy_migration:
-            query = build_legacy_migration_query(self.messages, _PREFETCH_SEARCH_QUERY_MAX_CHARS)
+            query = build_legacy_migration_query(
+                self.messages, _PREFETCH_SEARCH_MIGRATION_QUERY_MAX_CHARS
+            )
             if query is not None:
                 mt.emit("query", queryChars=len(query), messageCount=len(self.messages),
                         queryStrategy="legacy_structured")
                 return query
 
-        primary_sections: List[str] = []
-        supporting_sections: List[str] = []
+        sections: List[str] = []
+        seen = set()
+        # Spend the budget on the current intent first, not an old long turn.
+        for msg in reversed(self.messages):
+            if getattr(msg, "role", "") != "user":
+                continue
+            text = " ".join(
+                part.text for part in getattr(msg, "parts", [])
+                if isinstance(getattr(part, "text", None), str) and part.text.strip()
+            )
+            text = self._truncate_prefetch_query_text(text, _PREFETCH_SEARCH_TEXT_PART_MAX_CHARS)
+            if not text or text in seen:
+                continue
+            sections.append(text)
+            seen.add(text)
+            if len(sections) >= _PREFETCH_SEARCH_MAX_USER_MESSAGES:
+                break
 
-        for msg in self.messages:
-            role = getattr(msg, "role", "")
-            speaker = getattr(msg, "peer_id", "") or role
-            parts = getattr(msg, "parts", [])
-
-            text_parts: List[str] = []
-
-            for part in parts:
-                if hasattr(part, "text") and part.text:
-                    limit = (
-                        _PREFETCH_SEARCH_TEXT_PART_MAX_CHARS
-                        if role == "user"
-                        else _PREFETCH_SEARCH_ASSISTANT_TEXT_PART_MAX_CHARS
-                    )
-                    text_parts.append(self._truncate_prefetch_query_text(part.text, limit))
-            if text_parts:
-                section = f"{speaker}: " + "\n".join(text_parts)
-                if role == "user":
-                    primary_sections.append(section)
-                else:
-                    supporting_sections.append(section)
-
-        query = "\n\n".join(primary_sections + supporting_sections)
-        if not query.strip():
-            query = self._assemble_conversation(self.messages)
-
+        query = " ".join(sections)
         result = self._truncate_prefetch_query_text(query, _PREFETCH_SEARCH_QUERY_MAX_CHARS)
-        mt.emit("query", queryChars=len(result), beforeTotalCapChars=len(query), messageCount=len(self.messages))
+        mt.emit("query", queryChars=len(result), beforeTotalCapChars=len(query),
+                messageCount=len(self.messages), selectedMessageCount=len(sections),
+                queryStrategy="recent_user_intent")
         return result
 
     def create_tool_context(self, default_search_uris=[]):
@@ -591,11 +588,9 @@ After exploring, analyze the conversation and output ALL memory write/edit/delet
         files_to_read_from_search = []  # 收集需要读取的文件（eager_prefetch 模式）
 
         # 批量 search：所有目录一次搜索
-        if ls_dirs:
+        search_query = self._build_prefetch_search_query() if ls_dirs else ""
+        if search_query:
             dir_list = list(ls_dirs)
-            search_query = self._build_prefetch_search_query()
-            if not search_query:
-                search_query = "conversation"
             search_uris = await self.search_files(
                 query=search_query,
                 search_uris=dir_list,

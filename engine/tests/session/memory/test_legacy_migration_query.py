@@ -8,8 +8,9 @@ import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, List
+from typing import Any, Dict, List
 import unittest
+from unittest.mock import AsyncMock
 
 ROOT = Path(os.environ.get("VIOLOOP_NATIVE_SOURCE", Path(__file__).resolve().parents[3]))
 STAGING = Path(os.environ.get("VIOLOOP_QUERY_STAGING", ROOT / "openviking/utils"))
@@ -33,20 +34,23 @@ def entity(name, **fields):
 
 def provider_class():
     source = Path(os.environ.get("VIOLOOP_QUERY_PROVIDER", ROOT / "openviking/session/memory/session_extract_context_provider.py"))
-    tree = ast.parse(source.read_text())
+    tree = ast.parse(source.read_text(encoding="utf-8"))
     cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SessionExtractContextProvider")
-    methods = [node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name in {
-        "_build_prefetch_search_query", "_truncate_prefetch_query_text",
+    methods = [node for node in cls.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
+        "_build_prefetch_search_query", "_truncate_prefetch_query_text", "prefetch",
     }]
+    for method in methods:
+        method.decorator_list = []
     reduced = ast.ClassDef(name="Provider", bases=[], keywords=[], body=methods, decorator_list=[])
     module = ast.fix_missing_locations(ast.Module(body=[reduced], type_ignores=[]))
-    # Read the actual constants, so reducing the 5000 cap fails these tests.
+    # Exercise the actual ordinary-session and structured-migration budgets.
     constants = {
         node.targets[0].id: ast.literal_eval(node.value) for node in tree.body
         if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
         and node.targets[0].id.startswith("_PREFETCH_SEARCH_")
     }
-    namespace = {"Any": Any, "List": List, "build_legacy_migration_query": build,
+    namespace = {"Any": Any, "Dict": Dict, "List": List, "build_legacy_migration_query": build,
+                 "add_tool_call_pair_to_messages": lambda messages, **kwargs: messages.append(kwargs),
                  "mt": SimpleNamespace(emit=lambda *args, **kwargs: None), **constants}
     exec(compile(module, str(source), "exec"), namespace)
     return namespace["Provider"]
@@ -114,7 +118,7 @@ class LegacyQueryTests(unittest.TestCase):
                         SimpleNamespace(role="assistant", parts=[SimpleNamespace(text="unexpected role")])]:
             self.assertIsNone(build([valid, unknown], 5000))
 
-    def test_provider_retains_5000_cap_and_does_not_change_ordinary_queries(self):
+    def test_provider_keeps_migration_budget_separate_from_ordinary_user_intent(self):
         cls = provider_class()
         provider = cls()
         provider.is_legacy_migration = True
@@ -125,12 +129,102 @@ class LegacyQueryTests(unittest.TestCase):
         provider.is_legacy_migration = False
         # The same words in a normal chat do not activate structured parsing.
         raw = provider.messages[0].parts[0].text
-        self.assertEqual(provider._build_prefetch_search_query(), "user: " + " ".join(raw.split())[:997] + "...")
+        ordinary = provider._build_prefetch_search_query()
+        self.assertLessEqual(len(ordinary), 256)
+        self.assertTrue(ordinary.startswith(" ".join(raw.split())[:30]))
         provider.messages = [SimpleNamespace(role="user", parts=[SimpleNamespace(text="ordinary chat")]),
                              SimpleNamespace(role="assistant", parts=[SimpleNamespace(text="assistant reply")])]
-        self.assertEqual(provider._build_prefetch_search_query(), "user: ordinary chat assistant: assistant reply")
+        self.assertEqual(provider._build_prefetch_search_query(), "ordinary chat")
         provider.is_legacy_migration = True
-        self.assertEqual(provider._build_prefetch_search_query(), "user: ordinary chat assistant: assistant reply")
+        self.assertEqual(provider._build_prefetch_search_query(), "ordinary chat")
+
+
+class SessionPrefetchQueryTests(unittest.TestCase):
+    def provider(self, messages):
+        provider = provider_class()()
+        provider.is_legacy_migration = False
+        provider.messages = messages
+        return provider
+
+    def test_tool_dumps_and_assistant_reasoning_do_not_expand_the_user_query(self):
+        user = SimpleNamespace(role="user", parts=[SimpleNamespace(
+            text="检查代理设置并确认是否需要为当前网络配置代理")])
+        provider = self.provider([user])
+        expected = provider._build_prefetch_search_query()
+        provider.messages.extend([
+            SimpleNamespace(role="assistant", parts=[SimpleNamespace(
+                text="<thinking>ASSISTANT_REASONING " * 1000)]),
+            SimpleNamespace(role="tool", parts=[SimpleNamespace(
+                text=json.dumps({"type": "tool_result", "result": "TOOL_DUMP " * 4000}))]),
+            SimpleNamespace(role="assistant", parts=[SimpleNamespace(
+                text=json.dumps({"type": "tool_use", "reasoning_content": "REPEATED " * 1000}))]),
+        ])
+        before = copy.deepcopy(provider.messages)
+        self.assertEqual(provider._build_prefetch_search_query(), expected)
+        self.assertEqual(provider.messages, before)
+
+    def test_latest_user_intent_has_priority_over_long_old_conversations(self):
+        provider = self.provider([
+            SimpleNamespace(role="user", parts=[SimpleNamespace(text=f"old-topic-{i} " * 1000)])
+            for i in range(20)
+        ] + [SimpleNamespace(role="user", parts=[SimpleNamespace(text="请记住我现在偏好周末徒步")])])
+        query = provider._build_prefetch_search_query()
+        self.assertTrue(query.startswith("请记住我现在偏好周末徒步"))
+        self.assertNotIn("old-topic-0 ", query)
+        self.assertLessEqual(len(query), 256)
+
+    def test_multiple_parts_and_repeated_turns_cannot_bypass_the_query_budget(self):
+        latest = SimpleNamespace(role="user", peer_id="transport-peer-id", parts=[
+            SimpleNamespace(text="CURRENT_USER_INTENT " * 1000),
+            SimpleNamespace(text="EXTRA_PART " * 1000),
+        ])
+        provider = self.provider([copy.deepcopy(latest) for _ in range(100)])
+        before = copy.deepcopy(provider.messages)
+        query = provider._build_prefetch_search_query()
+        self.assertLessEqual(len(query), 256)
+        self.assertEqual(query.count("CURRENT_USER_INTENT"),
+                         self.provider([latest])._build_prefetch_search_query().count("CURRENT_USER_INTENT"))
+        self.assertNotIn("transport-peer-id", query)
+        self.assertEqual(provider.messages, before)
+
+    def test_no_user_intent_does_not_fall_back_to_the_entire_conversation(self):
+        for messages in [[], [SimpleNamespace(role="assistant", parts=[SimpleNamespace(text="output " * 2000)])],
+                         [SimpleNamespace(role="tool", parts=[SimpleNamespace(text="log " * 2000)])],
+                         [SimpleNamespace(role="user", parts=[SimpleNamespace(text=" \n ")])]]:
+            provider = self.provider(messages)
+            provider._assemble_conversation = lambda *_: self.fail("must not embed the full conversation")
+            self.assertEqual(provider._build_prefetch_search_query(), "")
+
+
+class SessionPrefetchFlowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_empty_user_query_skips_search_but_keeps_source_and_direct_reads(self):
+        provider = provider_class()()
+        provider.is_legacy_migration = False
+        source = "assistant execution evidence " * 1000
+        provider.messages = [SimpleNamespace(role="assistant", parts=[SimpleNamespace(text=source)])]
+        conversation = {"role": "user", "content": source}
+        provider._build_conversation_message = lambda: conversation
+        multi = SimpleNamespace(stage="user", operation_mode="update", directory="viking://user/default/memories/events",
+                                filename_has_variables=lambda: True)
+        single = SimpleNamespace(stage="user", operation_mode="update", directory="viking://user/default/memories",
+                                 filename_template="profile.md", filename_has_variables=lambda: False)
+        provider._get_registry = lambda: SimpleNamespace(list_all=lambda **_: [multi, single])
+        provider._isolation_handler = SimpleNamespace(
+            allows_schema=lambda _: True, get_read_scope=lambda: SimpleNamespace(),
+            render_schema_directories=lambda schema: [schema.directory])
+        provider._eager_prefetch = False
+        provider.search_files = AsyncMock(return_value=[])
+        provider._append_structured_read_result = AsyncMock(return_value=1)
+
+        messages = await provider.prefetch()
+
+        provider.search_files.assert_not_called()
+        self.assertIs(messages[0], conversation)
+        self.assertEqual(messages[0]["content"], source)
+        self.assertEqual(provider.messages[0].parts[0].text, source)
+        provider._append_structured_read_result.assert_awaited_once()
+        self.assertEqual(provider._append_structured_read_result.call_args.kwargs["file_uri"],
+                         "viking://user/default/memories/profile.md")
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@
 
 ## 安装
 
-需要 Node.js 24、uv、C/C++ 编译工具（macOS Xcode Command Line Tools；Linux 的编译器和开发头文件）。Rust 可以使用本机版本（>=1.91.1），或仅安装到本目录的忽略目录：
+需要 Node.js 24、uv、C/C++ 编译工具（macOS Xcode Command Line Tools；Linux 的编译器和开发头文件）。Rust 可以使用本机版本（>=1.94.1），或仅安装到本目录的忽略目录：
 
 ```sh
 npm run setup -- --bootstrap-rust
@@ -39,6 +39,8 @@ npm start -- --data-dir "$PWD/.local/data" --socket "$PWD/.local/mem.sock"
 模型目录需含 `bge-m3-q8_0.gguf`；源码运行也会查找本仓库的 `models/`，无需为该目录设置环境变量。也可用 `--embedding-model /path/to/model.gguf`。模型不随 Git 导入。正式模型调用仍使用 Device 的 `/internal/memory/chat/completions`（默认 `127.0.0.1:9090`），可通过 `OPENVIKING_DEVICE_MODEL_URL` 指定另一个本机 Device 地址。独立测试入口会提供本地确定性模型响应，无需连接真实 Device 或云服务。
 
 普通向量请求保持本地 BGE；迁移向量请求经 Device 的 `/internal/memory/embeddings`，使用当前登录用户自动领取、续期的模型网关凭证调用云端 `bge-m3`。无需单独配置迁移 URL 或密钥文件。
+
+普通召回查询超过 256 字符时，先经同一鉴权通道调用 Device 的 `/internal/memory/retrieval-query`，用云端 Flash 提炼检索要点，再进入本地 BGE 队列。短查询直接向量化。提炼由 Device 缓存、限时，失败不回退到长原文计算；原始记忆内容及文档索引向量不被改写。`bge.request` 日志分别记录原长度、实际向量化长度、提炼、排队和计算耗时。
 
 ## 验证和构建
 
@@ -69,6 +71,10 @@ Release 发布后，独立的 APT 通知任务使用真实仓库名和 tag 向�
 ## 旧记忆保护
 
 默认只读读取数据目录内的 `graph.db`，也可显式指定 `VIOLOOP_LEGACY_MEMORY_DB`。新记忆写入 `openviking/`，迁移进度写入 `legacy-migration/`，可重建图谱写入 `openviking-graph.db`。迁移不会删除旧文件或旧数据库，成功后也不自动清理。卸载或 purge 同样保留记忆数据。
+
+向量索引快照先写入临时目录，校验并刷盘所有文件及目录后，再发布带文件大小和 SHA-256 的 `.write_done` 完成标记。刷盘失败不会发布成功标记或提前清理增量日志；正常关闭保留两个经过校验的快照。旧版空完成标记继续兼容，但加载前会检查索引元数据和二进制文件结构。
+
+若最新快照损坏或缺少完成标记，启动时将现有快照移入索引目录内的 `snapshot-recovery-*`，保留故障现场，再从原始记录分批重建索引。不会只回退到旧快照：旧快照之后的增量日志可能已经清理，直接回退会遗漏记忆。原始记录库不被删除或替换；没有原始记录来源时停止恢复并报错，避免用空索引覆盖已有数据。
 
 首次就绪自动迁移。失败最多自动重试三轮（10/30/60 秒）；已成功批次不会重放。提交结果未确认、任务及归档结果缺失的批次统一按 failed 处理，共用三轮自动重试额度；每次手动重试只补跑一轮。手动入口及 Device/PC HTTP 协议保持兼容。Identity/Soul 模板由运行配置禁用；不会自动删除历史文件。
 
