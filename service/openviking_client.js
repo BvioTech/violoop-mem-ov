@@ -79,6 +79,15 @@ class OpenVikingClient {
     return this.request('POST', '/api/v1/system/wait', { timeout: 1 }, { timeoutMs: 3000 })
   }
 
+  async setOutputLanguage(language) {
+    const result = await this.request('PATCH', '/api/v1/admin/configuration', {
+      settings: { output_language_override: language },
+    })
+    if (result?.settings?.output_language_override !== language) {
+      throw new Error('OpenViking did not confirm the output language')
+    }
+  }
+
   stat(uri) { return this.request('GET', '/api/v1/fs/stat?' + new URLSearchParams({ uri })) }
   attrs(uri) { return this.request('GET', '/api/v1/fs/attrs?' + new URLSearchParams({ uri })) }
   writeMemory(uri, content, { mode, tags } = {}) {

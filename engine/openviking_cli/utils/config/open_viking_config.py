@@ -352,7 +352,7 @@ class OpenVikingConfig(BaseModel):
         ),
     )
 
-    output_language_override: str = Field(
+    output_language_override: str = RuntimeField(
         default="",
         description=(
             "When non-empty, bypasses content-based language detection for memory extraction "
