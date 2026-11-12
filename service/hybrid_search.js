@@ -1,6 +1,6 @@
 // Optional literal-keyword branch over native OpenViking grep. This module
 // fuses evidence without inventing a comparable vector score for regex hits.
-const { PREVIEW_CHARS, withTruncationNotice } = require('./retrieval_budget')
+const { boundPreviews } = require('./retrieval_budget')
 const invalid = message => Object.assign(new Error(message), { status: 400, code: 'invalid_query' })
 const canonical = value => value.replace(/\/(\.abstract|\.overview)\.md$/, '').replace(/\/$/, '')
 const levelOf = value => value.endsWith('/.abstract.md') ? 0 : value.endsWith('/.overview.md') ? 1 : 2
@@ -52,43 +52,25 @@ function mergeSearch(semantic, matches, { limit = 10, maxChars = 8000, level } =
     } else semanticGroup.push({ ...hit, group: 'semantic', semanticRank: index + 1, keywordMatches: [] })
   }
   const keywordGroup = [...lexical.values()].map(hit => ({ ...hit, group: 'keyword' }))
-  const selected = []
-  let used = 0
-  // Select round-robin, preserving order inside each pool. Never shorten a
-  // preview merely to fit the remaining total budget or skip ahead past it.
-  selection: for (let i = 0; i < Math.max(semanticGroup.length, keywordGroup.length); i++) {
-    for (const hit of [semanticGroup[i], keywordGroup[i]]) {
-      if (!hit) continue
-      const rendered = renderPreview(hit)
-      if (used + rendered.content.length > maxChars) break selection
-      selected.push(rendered)
-      used += rendered.content.length
-    }
-  }
-  // Selection is interleaved; display remains grouped without implying that
-  // keyword matches have a semantic relevance score.
-  return [...selected.filter(hit => hit.group === 'semantic'), ...selected.filter(hit => hit.group === 'keyword')]
+  // Candidate selection is independent of body length. Keep each pool's rank
+  // and share one budget only after URI deduplication is complete.
+  return boundPreviews([...semanticGroup, ...keywordGroup].map(renderPreview), maxChars)
 }
 
 function renderPreview(hit) {
-  const perHitChars = PREVIEW_CHARS
   const hasSemantic = Number.isFinite(hit.score)
   const hasKeyword = hit.keywordMatches.length > 0
   const sources = [...(hasSemantic ? ['semantic'] : []), ...(hasKeyword ? ['keyword'] : [])]
   const semanticText = hasSemantic ? String(hit.abstract || hit.content || '') : ''
   const keywordText = hit.keywordMatches.map(m => `[L${m.level} line ${m.line}] ${m.content}`).join('\n')
   const blocks = []
-  // Split a dual hit's preview between its two evidence types before final
-  // clipping, so a long directory summary cannot hide keyword evidence.
-  const semanticBudget = hasKeyword ? Math.floor(Math.max(0, perHitChars - 24) / 2) : Math.max(0, perHitChars - 11)
-  if (hasSemantic) blocks.push('[Semantic]\n' + semanticText.slice(0, semanticBudget))
-  const remaining = Math.max(0, perHitChars - blocks.join('\n').length - (blocks.length ? 1 : 0) - 10)
-  if (hasKeyword) blocks.push('[Keyword]\n' + keywordText.slice(0, remaining))
-  const content = blocks.join('\n').slice(0, perHitChars)
-  return withTruncationNotice({ ...hit, score: hasSemantic ? hit.score : null, semanticScore: hasSemantic ? hit.score : null,
+  if (hasSemantic) blocks.push('[Semantic]\n' + semanticText)
+  if (hasKeyword) blocks.push('[Keyword]\n' + keywordText)
+  const content = blocks.join('\n')
+  return { ...hit, score: hasSemantic ? hit.score : null, semanticScore: hasSemantic ? hit.score : null,
     retrievalSources: sources, abstract: content, content,
     keywordMatches: hit.keywordMatches.map(m => ({ uri: m.uri, line: m.line, level: m.level })),
-    truncated: !!hit.truncated || !!hit.keywordTruncated || semanticText.length > semanticBudget || keywordText.length > remaining })
+    truncated: !!hit.truncated || !!hit.keywordTruncated }
 }
 
 module.exports = { keywordsPattern, mergeSearch }

@@ -4,7 +4,7 @@ const { createHash } = require('crypto')
 const { createEntries } = require('./openviking_entries')
 const { validateVikingUri } = require('./openviking_uri')
 const { keywordsPattern, mergeSearch } = require('./hybrid_search')
-const { PREVIEW_CHARS, boundPreviews } = require('./retrieval_budget')
+const { previewBudget, boundPreviews } = require('./retrieval_budget')
 const { searchOptions, createMutations, enrich, metadata, levelOf, canonical } = require('./openviking_agent')
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024
@@ -54,13 +54,15 @@ async function readJson(req) {
   return body
 }
 
-function flatten(result, limit, maxChars) {
+function flatten(result, limit, maxChars = Infinity, minScore) {
   if (!result || !['memories', 'resources', 'skills'].every(k => Array.isArray(result[k]))) {
     throw fail('upstream_error', 'invalid OpenViking retrieval result', 502)
   }
   const seen = new Set()
   return [...result.memories, ...result.resources, ...result.skills]
     .filter(h => h && typeof h.uri === 'string' && h.uri.startsWith('viking://') && Number.isFinite(h.score))
+    .filter(h => minScore === undefined || h.score >= minScore)
+    .filter(h => maxChars === 0 || (typeof h.abstract === 'string' && h.abstract.trim()))
     .sort((a, b) => b.score - a.score)
     .filter(h => { const key = uri(h.uri); if (seen.has(key)) return false; seen.add(key); return true })
     .slice(0, limit)
@@ -73,7 +75,7 @@ function flatten(result, limit, maxChars) {
         abstract: String(full).slice(0, maxChars), content: String(full).slice(0, maxChars), score: h.score,
         contextType: h.context_type, level: h.level,
         ...(Array.isArray(h.tags) ? { tags: h.tags } : {}),
-        truncated: String(full).length > maxChars,
+        truncated: !!h.truncated || String(full).length > maxChars,
       }
     })
 }
@@ -85,7 +87,8 @@ function entity(hit, recall = false) {
   return {
     id: hit.uri, name: hit.title, type: 'memory', aliases: [], domains: [],
     observations, relations: [], matchedBy: 'semantic', score: hit.score,
-    uri: hit.uri, key: hit.key, truncated: hit.truncated,
+    // Preserve the legacy envelope shape and report its own compatibility cap.
+    uri: hit.uri, key: hit.key, truncated: !!hit.truncated || observations.join('').length < hit.content.length,
   }
 }
 
@@ -301,7 +304,7 @@ class IngestJournal {
   }
 }
 
-function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 8000,
+function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 8000,
   abstractMaxChars = 600, readMaxChars = 6000, legacySourceFile, coexistence = false } = {}) {
   if (!dataDir) throw new Error('adapter dataDir is required')
   for (const value of [recallMaxChars, searchMaxChars, abstractMaxChars, readMaxChars]) {
@@ -368,13 +371,15 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     res.end(body)
   }
   async function retrieve(body, mode, requestedLimit) {
-    if (!['recall', 'search'].includes(mode)) throw fail('invalid_query', 'mode must be recall or search')
+    if (!['recall', 'find', 'search'].includes(mode)) throw fail('invalid_query', 'mode must be recall, find or search')
+    const automatic = mode === 'recall'
+    const budgetChars = previewBudget(body.budgetChars, automatic ? recallMaxChars : searchMaxChars)
     const pattern = keywordsPattern(body.keywords)
-    const options = searchOptions(body, client, { automatic: mode === 'recall' })
-    if (mode === 'recall' && pattern) throw fail('invalid_query', 'keywords are only supported by search')
+    const options = searchOptions(body, client, { automatic })
+    if (automatic && pattern) throw fail('invalid_query', 'keywords are only supported by search')
     let q = query(body.query)
     const requested = integer(requestedLimit ?? body.limit, 10)
-    const limit = mode === 'recall' || pattern ? Math.min(requested, 10) : requested
+    const limit = automatic || pattern ? Math.min(requested, 10) : requested
     // No default score floor. Explicit caller thresholds remain wire-compatible.
     const minScore = body.minScore ?? body.minSim
     if (minScore !== undefined && !Number.isFinite(minScore)) throw fail('invalid_query', 'minScore must be finite')
@@ -385,7 +390,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     if (targetUri !== undefined) validateVikingUri(targetUri)
     if (body.sessionId !== undefined && typeof body.sessionId !== 'string') throw fail('invalid_query', 'sessionId must be a string')
     if (!limit) return []
-    if (mode === 'recall') {
+    if (automatic) {
       q = q.slice(0, 600)
       if (q.length < 8 || TRIVIAL_RE.test(q)) return []
     }
@@ -398,7 +403,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
         nativeRetrieve(q, { ...options, mode, limit, minScore, targetUri: scope, sessionId: body.sessionId, level }),
         runGrep({ pattern, prefix: scope, limit: Math.min(50, Math.max(10, limit * 4)), caseInsensitive: true }),
       ])
-      const semantic = flatten(result, limit, PREVIEW_CHARS).filter(h => minScore === undefined || h.score >= minScore)
+      const semantic = flatten(result, limit, undefined, minScore)
       let matches = grep.result.matches
       // grep has no time/type predicates. Check candidates against native
       // filter-only find, separately per level (find deduplicates by URI).
@@ -417,12 +422,11 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
         }))
         matches = matches.filter(m => eligible.has(levelOf(m.uri) + ':' + canonical(m.uri)))
       }
-      return enrich(client, mergeSearch(semantic, matches, { limit, maxChars: searchMaxChars, level }), result, options.includeProvenance)
+      return enrich(client, mergeSearch(semantic, matches, { limit, maxChars: budgetChars, level }), result, options.includeProvenance)
     }
     const result = await nativeRetrieve(q, { ...options, mode, limit, minScore, targetUri, sessionId: body.sessionId, level })
-    const hits = flatten(result, limit, PREVIEW_CHARS)
-      .filter(h => minScore === undefined || h.score >= minScore)
-    return enrich(client, boundPreviews(hits, mode === 'recall' ? recallMaxChars : searchMaxChars), result, options.includeProvenance)
+    const hits = flatten(result, limit, undefined, minScore)
+    return enrich(client, boundPreviews(hits, budgetChars), result, options.includeProvenance)
   }
   async function readMemory(key, params) {
     const requestedUri = uri(key)
@@ -472,12 +476,12 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     return { result, target, limit }
   }
   async function grepMemory(body) {
+    const budgetChars = previewBudget(body.budgetChars, 6000)
     const { result, target, limit } = await runGrep(body)
     const hits = result.matches.slice(0, limit)
-    const perHitChars = hits.length ? Math.min(600, Math.floor(6000 / hits.length)) : 600
-    const matches = hits.map(m => ({ uri: m.uri, line: m.line,
+    const matches = boundPreviews(hits.map(m => ({ ...m,
       level: m.uri.endsWith('/.abstract.md') ? 0 : m.uri.endsWith('/.overview.md') ? 1 : 2,
-      content: m.content.slice(0, perHitChars), truncated: m.content.length > perHitChars }))
+    })), budgetChars).map(({ abstract, ...match }) => match)
     return { backend: 'openviking', uri: target, pattern: body.pattern, matches, count: matches.length,
       limited: limit > 0 && result.matches.length >= limit, truncated: result.matches.length > limit || matches.some(m => m.truncated),
       filesScanned: Number.isFinite(result.files_scanned) ? result.files_scanned : null }
@@ -600,8 +604,8 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
           const hits = await retrieve({ ...body, query: text }, 'recall', maxEntities)
           return json(res, 200, { backend: 'openviking', results: hits, entities: hits.map(h => entity(h, true)), relations: [] })
         }
-        // Agent/proactive search uses native search; automatic recall uses
-        // /v2/recall and native find. Return summaries for progressive reading.
+        // Agent search defaults to native search; proactive callers select find
+        // without the automatic-recall gate. Return summaries for progressive reading.
         const mode = body.mode ?? 'search'
         const hits = await retrieve(body, mode)
         return json(res, 200, { backend: 'openviking', results: hits })

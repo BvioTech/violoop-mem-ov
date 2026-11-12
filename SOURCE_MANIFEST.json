@@ -9,13 +9,13 @@
           "path": "config.js",
           "sha256": "6cea5346c29fc6f68ac0ce90f1cf1a288540353d133fb8dcd2c2f0752a352552",
           "destination": "service/config.js",
-          "integration_sha256": "df28d723b70f9338266c75a78cb458d9663bffb47633c5e98e402d911f1ac621"
+          "integration_sha256": "dc08a3211f42808e5a57a658ce9ab1d16ee3a62972c68ff983ba8b1fc2bef0c5"
         },
         {
           "path": "deploy/openviking-adapter.yaml",
           "sha256": "a319daa2e1f0e0ba69a90a0e1269cb68ed85cfb624bf971499d08417a5ee7047",
           "destination": "deploy/openviking-adapter.yaml",
-          "integration_sha256": "c4d228f334fedb7fc4ef7882f85e320ca6d7ccffefe72da3635ef8fe1eea3ee2"
+          "integration_sha256": "b5d0ed3acbc2fab0041a560619774cdfc27e5362d9d5d3f41dfb4acff6ea7cd1"
         },
         {
           "path": "deploy/ov.conf.example",
@@ -37,7 +37,8 @@
         {
           "path": "docs/agent-memory.md",
           "sha256": "a780b6b46529aedc58c05ba394adee030f723274e65de2550e3bd7a9bd272b61",
-          "destination": "docs/agent-memory.md"
+          "destination": "docs/agent-memory.md",
+          "integration_sha256": "b2d1774b9d4438079730f8ee56d52408825e1078a3fc537ef4292f9da9aee1b2"
         },
         {
           "path": "docs/legacy-memory-migration.md",
@@ -75,7 +76,8 @@
         {
           "path": "hybrid_search.js",
           "sha256": "a9665311c262e0bfc7aa399c678c8cbe89713989cb8ca7673f14e708a79e8d92",
-          "destination": "service/hybrid_search.js"
+          "destination": "service/hybrid_search.js",
+          "integration_sha256": "6c15cb75720ccdf3cba6ce85559ad5c1c33572d8ba86166f8682375e60002a92"
         },
         {
           "path": "legacy_migration.js",
@@ -115,7 +117,7 @@
           "path": "openviking_adapter.js",
           "sha256": "ea24f404ce71756a6d8f9368bad303bbd61fc28539780862e81d0a6165acddfe",
           "destination": "service/openviking_adapter.js",
-          "integration_sha256": "30fd9a0e26ea86f1d26c2e20f1bf3e44109d3ed235484fc3e417a535d60a8c9f"
+          "integration_sha256": "b29991f2e3d5f0761f03cdfe26f76b72082b17998dd2271c36fa0bf3a8879767"
         },
         {
           "path": "openviking_agent.js",
@@ -126,7 +128,7 @@
           "path": "openviking_client.js",
           "sha256": "36ea9385c2b929960a977687d02ea40a15a628e4d89320a6e6e44a6175f6d0dd",
           "destination": "service/openviking_client.js",
-          "integration_sha256": "954a1d1f9413e5284278b642f11511de62b7044517aa25434e342bb1b27809cb"
+          "integration_sha256": "2bbc6189dde2b3aa2c4b92ca74156bd4306cac1def0b69af1c548ce2c7f2d869"
         },
         {
           "path": "openviking_consolidation.js",
@@ -165,7 +167,8 @@
         {
           "path": "retrieval_budget.js",
           "sha256": "8cddfc31c2bedc55edbf7a1a9dbc2d1fa2a0dce985fe36cd19b2b4d23b6938c0",
-          "destination": "service/retrieval_budget.js"
+          "destination": "service/retrieval_budget.js",
+          "integration_sha256": "7c03247d5dd8c53af5e437c31117447574a57015c316cef296d07ffd0cc6bf3b"
         },
         {
           "path": "scripts/build-deb.sh",
@@ -289,7 +292,7 @@
           "path": "test/openviking.js",
           "sha256": "b570f0095bad7c69a67d0ff96262cbc01b753d5007fe3a64ac3f4c380a57447a",
           "destination": "service/test/openviking.js",
-          "integration_sha256": "d21a9f6af419e162499543c6eb2613e4e95add7eaf32ef72a70e1c186356510e"
+          "integration_sha256": "3971cf9cb86ec2aaab87ff250fe6f698fbc358086b86c18ac5c7cca88798790f"
         },
         {
           "path": "test/openviking_consolidation.js",

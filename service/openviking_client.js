@@ -63,12 +63,13 @@ class OpenVikingClient {
 
   retrieve(query, { mode, limit, minScore, targetUri, sessionId, level, readContent = false,
     tags, since, until, timeField, contextType, includeProvenance, filter, eventsTimeDecayProtection } = {}) {
-    return this.request('POST', `/api/v1/search/${mode === 'recall' ? 'find' : 'search'}`, {
+    const find = mode === 'recall' || mode === 'find'
+    return this.request('POST', `/api/v1/search/${find ? 'find' : 'search'}`, {
       query, limit, read_content: readContent,
       ...(level === undefined ? {} : { level }),
       ...(minScore === undefined ? {} : { score_threshold: minScore }),
       ...(targetUri ? { target_uri: targetUri } : {}),
-      ...(sessionId && mode !== 'recall' ? { session_id: sessionId } : {}),
+      ...(sessionId && !find ? { session_id: sessionId } : {}),
       ...Object.fromEntries(Object.entries({ tags, since, until, time_field: timeField,
         events_time_decay_protection: eventsTimeDecayProtection,
         context_type: contextType, include_provenance: includeProvenance, filter }).filter(([, v]) => v !== undefined)),
