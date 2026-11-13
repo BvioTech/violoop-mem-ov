@@ -151,9 +151,7 @@ def test_ci_build_uses_device_runtime_and_release_is_tag_only():
     assert release['needs'] == 'build'
     assert release['permissions'] == {'contents': 'write'}
     assert release['if'] == "github.repository == 'BvioTech/violoop-mem-ov' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')"
-    assert jobs['notify-apt']['needs'] == 'release'
-    assert jobs['notify-apt']['if'] == release['if']
-    assert jobs['notify-apt'].get('permissions', workflow['permissions']) == {'contents': 'read'}
+    assert 'notify-apt' not in jobs
     upload = next(step for step in jobs['build']['steps'] if step.get('uses', '').startswith('actions/upload-artifact@'))
     download = next(step for step in release['steps'] if step.get('uses', '').startswith('actions/download-artifact@'))
     assert upload['with']['name'] == download['with']['name']
@@ -201,35 +199,3 @@ for (const [changes, shouldFail] of [
 }
 """
     subprocess.run(['node', '-e', 'const CODE = ' + json.dumps(code) + ';\n' + harness], cwd=ROOT, check=True)
-
-
-def test_ci_apt_notification_signs_exact_body_and_fails_closed():
-    import os
-    import yaml
-    workflow = yaml.safe_load((ROOT / '.github/workflows/build.yml').read_text())
-    step = next(step for step in workflow['jobs']['notify-apt']['steps'] if step['name'] == 'Notify APT repository')
-    code = step['run'].partition("node <<'JS'\n")[2].rpartition('\nJS')[0]
-    assert code
-    mock = r"""
-const assert = require('node:assert/strict');
-global.fetch = async (url, options) => {
-  const body = JSON.stringify({ repo: process.env.GITHUB_REPOSITORY, tag: process.env.GITHUB_REF_NAME });
-  const expected = 'sha256=' + require('node:crypto').createHmac('sha256', process.env.APT_WEBHOOK_SECRET).update(body).digest('hex');
-  assert.equal(url, process.env.HOOK_URL);
-  assert.equal(options.method, 'POST');
-  assert.equal(options.body, body);
-  assert.equal(options.headers['Content-Type'], 'application/json');
-  assert.equal(options.headers['X-Hub-Signature-256'], expected);
-  assert.ok(options.signal instanceof AbortSignal);
-  return { status: Number(process.env.TEST_HTTP_STATUS), text: async () => 'fixture failure' };
-};
-"""
-    for secret, status, expected_exit in [('fixture-secret', '202', 0), ('fixture-secret', '401', 1), ('', '202', 1)]:
-        env = dict(os.environ, APT_WEBHOOK_SECRET=secret, TEST_HTTP_STATUS=status,
-                   HOOK_URL=step['env']['HOOK_URL'], GITHUB_REPOSITORY='BvioTech/violoop-mem-ov', GITHUB_REF_NAME='v0.11.5')
-        result = subprocess.run(['node', '-e', mock + '\n' + code], cwd=ROOT, env=env, capture_output=True, text=True)
-        assert result.returncode == expected_exit, result.stderr
-        if expected_exit == 0:
-            assert 'APT sync accepted' in result.stdout
-        else:
-            assert ('APT webhook returned 401' if secret else 'Configure the APT_WEBHOOK_SECRET') in result.stderr
