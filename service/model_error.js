@@ -1,7 +1,7 @@
 // Structured Device errors plus compatibility with older SDK-wrapped failures.
 // The bridge's outer 502 must not hide an inner authentication/billing failure.
 const BLOCKING = new Set(['auth_error', 'authentication_error', 'invalid_api_key',
-  'credit_exhausted', 'budget_exceeded', 'permission_denied', 'MODEL_ROUTE_UNAVAILABLE', 'model_blocked'])
+  'credit_exhausted', 'budget_exceeded', 'permission_denied', 'MODEL_ROUTE_UNAVAILABLE', 'model_blocked', 'invalid_request'])
 const CODES = new Set([...BLOCKING, 'invalid_request', 'cancelled', 'rate_limited', 'provider_unavailable',
   'provider_overloaded', 'request_timeout', 'idle_timeout', 'hard_timeout', 'api_call_failed', 'empty_response', 'device_standby'])
 const PERMANENT = new Set([400, 401, 402, 403, 404, 405, 413, 415, 422])
@@ -35,7 +35,7 @@ function modelError(error) {
   const effectiveStatus = status || protocolStatus
   const normalizedCode = code || (auth || effectiveStatus === 401 ? 'auth_error'
     : billing || effectiveStatus === 402 ? 'credit_exhausted'
-      : effectiveStatus === 403 ? 'permission_denied' : undefined)
+      : effectiveStatus === 403 ? 'permission_denied' : effectiveStatus ? 'invalid_request' : undefined)
   const explicit = objects.find(o => typeof o.retryable === 'boolean')
   const retryable = permanent ? false : explicit?.retryable !== false && !/["']retryable["']\s*:\s*false\b/i.test(text)
   const metadata = {}
