@@ -51,6 +51,41 @@ test('invalid output ids and timing write failure cannot break work', () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
+test('LLM gateway preserves correlation headers and safe failure metadata', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-error-timing-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  let received
+  const upstream = http.createServer((req, res) => {
+    received = req.headers
+    req.resume()
+    req.on('end', () => {
+      res.writeHead(401, { 'x-request-id': 'req-correlated' })
+      res.end(JSON.stringify({ error: { code: 'auth_error', retryable: false, action: 'check_credentials',
+        model: 'configured', credential_source: 'byok', request_id: 'req-correlated', upstream_request_id: 'upstream-correlated',
+        message: 'PRIVATE_DO_NOT_COPY_TO_TIMING' }, violoop: { request_id: 'req-correlated' } }))
+    })
+  })
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve))
+  t.after(() => { upstream.closeAllConnections(); upstream.close() })
+  const gateway = await startModelGateway({ token: 'secret', timingDir: dir, embedder: {},
+    deviceUrl: `http://127.0.0.1:${upstream.address().port}/internal/memory/chat/completions` })
+  t.after(() => { gateway.server.closeAllConnections(); gateway.server.close() })
+  const response = await fetch(gateway.url + '/chat/completions', { method: 'POST', headers: {
+    authorization: 'Bearer secret', 'x-violoop-timing-task': 'task-correlated', 'x-violoop-timing-run': 'run-correlated',
+  }, body: JSON.stringify({ model: 'violoop-memory', messages: [{ role: 'user', content: 'source' }] }) })
+  assert.equal(response.status, 401)
+  assert.equal(response.headers.get('x-request-id'), 'req-correlated')
+  assert.equal((await response.json()).error.code, 'auth_error')
+  assert.equal(received['x-violoop-timing-task'], 'task-correlated')
+  assert.equal(received['x-violoop-timing-run'], 'run-correlated')
+  const records = fs.readFileSync(path.join(dir, 'task-correlated-gateway.jsonl'), 'utf8')
+  assert.ok(!records.includes('PRIVATE_DO_NOT_COPY_TO_TIMING'))
+  const event = JSON.parse(records.trim())
+  assert.equal(event.error.code, 'auth_error')
+  assert.equal(event.error.request_id, 'req-correlated')
+  assert.equal(event.requestId, 'req-correlated')
+})
+
 test('timing report retains failed attempt durations after a successful retry', () => {
   const { spawnSync } = require('child_process')
   const { writeJson } = require('../durable_json')

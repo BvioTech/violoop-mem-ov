@@ -491,6 +491,30 @@ test('non-retryable upstream polling errors pause without replaying an accepted 
   assert.equal(resumed.status().pendingCount, 0)
 })
 
+test('wrapped migration auth failure pauses untouched work and resumes after repair without replaying completed batches', async t => {
+  let repaired = false
+  const error = "Error code: 502 - {'error': {'message': '401 Authentication Fails, Your api key: ****demo is invalid (request_id: upstream-demo)'}}"
+  const f = retryFixture(t, task => task.name === 'problem' && !repaired ? { status: 'failed', error } : 'completed')
+  await f.svc.run()
+  await waitFor(() => !f.svc.state.started)
+  assert.equal(f.counts.get('first'), 1)
+  assert.equal(f.counts.get('problem'), 1)
+  assert.equal(f.counts.get('last'), undefined)
+  assert.equal(f.svc.status().automaticRetryCount, 0)
+  assert.equal(f.svc.status().lastError.code, 'auth_error')
+  assert.equal(f.svc.status().lastError.upstream_request_id, 'upstream-demo')
+  const saved = JSON.parse(fs.readFileSync(path.join(f.dir, 'legacy-migration/issues.json')))
+  assert.equal(saved.batches[0].errorInfo.code, 'auth_error')
+  repaired = true
+  assert.equal((await f.svc.start()).retriedBatches, 1)
+  await waitFor(() => !f.svc.state.started)
+  assert.equal(f.counts.get('first'), 1)
+  assert.equal(f.counts.get('problem'), 2)
+  assert.equal(f.counts.get('last'), 1)
+  assert.equal(f.svc.status().pendingCount, 0)
+  assert.deepEqual(f.batches.map(b => fs.readFileSync(path.join(f.dir, 'legacy-migration/batches', b.id + '.json'), 'utf8')), f.originalFiles)
+})
+
 test('upgrading a stopped old retry round never starts new automatic attempts', async t => {
   const f = retryFixture(t, task => task.name === 'problem' ? 'failed' : 'completed')
   f.svc.state.started = false
