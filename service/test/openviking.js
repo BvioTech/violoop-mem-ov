@@ -425,28 +425,29 @@ test('retired recall score environment/config values do not restore a default ga
   assert.ok(!Object.hasOwn(loaded.openviking, 'recallMinScore'))
 })
 
-test('recall fetches top ten across all levels and bounds each returned preview', async () => {
+test('recall defaults to ten and allows one extra candidate for pinned-memory deduplication', async () => {
   behavior = 'mixed_recall'
   try {
-    for (const body of [{ text: '部署'.repeat(1000) }, { text: '部署'.repeat(1000), maxEntities: 50 }]) {
+    for (const body of [{ text: '部署'.repeat(1000) }, { text: '部署'.repeat(1000), maxEntities: 11 }, { text: '部署'.repeat(1000), maxEntities: 50 }]) {
+      const count = body.maxEntities ? 11 : 10
       const result = await request('POST', '/v2/recall', body)
       assert.equal(result.status, 200)
-      assert.equal(result.body.results.length, 10)
+      assert.equal(result.body.results.length, count)
       assert.deepEqual([...new Set(result.body.results.map(h => h.level))].sort(), [0, 1, 2])
       assert.ok(result.body.results.every(h => h.score < 0.6))
-      assert.ok(result.body.results.every(h => h.content.length === 250 && h.truncated && h.truncationNotice))
+      assert.ok(result.body.results.every(h => h.content.length <= Math.ceil(2500 / count) && h.truncated && h.truncationNotice))
       assert.equal(result.body.results.reduce((total, h) => total + h.content.length, 0), 2500)
-      assert.ok(result.body.entities.every(e => e.observations.join('').length === 250 && e.truncated))
+      assert.ok(result.body.entities.every(e => e.observations.join('').length <= Math.ceil(2500 / count) && e.truncated))
       assert.equal(calls.at(-1).body.query.length, 600)
-      assert.equal(calls.at(-1).body.limit, 10)
+      assert.equal(calls.at(-1).body.limit, count)
     }
     const explicit = await request('POST', '/v2/recall', { text: '设备如何部署并检查日志', level: 2, minScore: 0.4, maxEntities: 1 })
     assert.equal(explicit.body.results.length, 1)
     assert.equal(calls.at(-1).body.level, 2)
     assert.equal(calls.at(-1).body.score_threshold, 0.4)
     const compat = await request('POST', '/v1/search', { query: '设备如何部署并检查日志', mode: 'recall', limit: 50 })
-    assert.equal(compat.body.results.length, 10)
-    assert.equal(calls.at(-1).body.limit, 10)
+    assert.equal(compat.body.results.length, 11)
+    assert.equal(calls.at(-1).body.limit, 11)
     assert.ok(!Object.hasOwn(calls.at(-1).body, 'level'))
     assert.ok(!Object.hasOwn(calls.at(-1).body, 'score_threshold'))
   } finally { behavior = 'ok' }

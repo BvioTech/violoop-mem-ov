@@ -10,6 +10,38 @@ const {linkedLegacyDatabase} = require('./fixtures/legacy')
 const {LegacyMigration} = require('../legacy_migration')
 const {createApp} = require('../openviking_adapter')
 const {readLegacySnapshot, legacyFacts} = require('../legacy_source')
+const {hash} = require('../legacy_source')
+const {writeJson} = require('../durable_json')
+
+test('a foreign migration receipt cannot disable native reads or authorize migration into a different scope', async t => {
+  for (const coexistence of [false, true]) {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-foreign-scope-'))
+    const stateFile = path.join(dataDir, 'legacy-migration', 'state.json')
+    writeJson(stateFile, {version: 1, scope: hash('old-scope'), batches: [], resources: [], started: true, activatedAt: 1})
+    const before = fs.readFileSync(stateFile)
+    const client = {scope: 'new-scope', user: 'test', ready: async () => true,
+      writeMemory: async () => ({vector_status: 'queued'})}
+    const app = createApp(client, {dataDir, coexistence})
+    const server = http.createServer(app)
+    server.listen(0, '127.0.0.1'); await once(server, 'listening')
+    t.after(async () => { server.close(); await app.close(); fs.rmSync(dataDir, {recursive: true, force: true}) })
+    const call = (method, route, body) => fetch('http://127.0.0.1:' + server.address().port + route, {
+      method, headers: {'content-type': 'application/json'}, ...(body === undefined ? {} : {body: JSON.stringify(body)}),
+    })
+    assert.equal((await call('GET', '/readyz')).status, 200)
+    const status = await call('GET', '/v2/migration/status')
+    assert.equal(status.status, coexistence ? 503 : 200)
+    if (!coexistence) assert.equal((await status.json()).enabled, false)
+    for (const route of ['/v2/migration/start', '/v2/migration/activate']) {
+      const res = await call('POST', route, {})
+      assert.equal(res.status, 409)
+      assert.equal((await res.json()).error.code, 'migration_scope_mismatch')
+    }
+    const write = await call('POST', '/v1/memory-entries', {memoryType: 'profile', content: 'hello'})
+    assert.equal(write.status, coexistence ? 409 : 201)
+    assert.deepEqual(fs.readFileSync(stateFile), before)
+  }
+})
 
 async function fixture(t) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mem-handoff-'))

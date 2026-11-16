@@ -148,7 +148,41 @@ test('corruption and scope changes fail closed without resubmission', async t =>
   const bad = new LegacyMigration({ dataDir: dir, sourceFile, client, journal })
   assert.throws(() => bad.status(), /damaged/); await assert.rejects(bad.start(), /damaged/); bad.stop()
   const other = new LegacyMigration({ dataDir: dir, sourceFile, client: { ...client, scope: 'other' }, journal })
-  assert.throws(() => other.status(), /different OpenViking scope/); other.stop()
+  assert.equal(other.status().reason, 'scope_mismatch')
+  assert.equal(other.status().enabled, false)
+  await assert.rejects(other.start(), { code: 'migration_scope_mismatch', status: 409 }); other.stop()
+})
+
+test('foreign migration receipts remain untouched and never resume or activate in another scope', async t => {
+  const dir = root(t), file = path.join(dir, 'legacy-migration', 'state.json')
+  const original = { version: 1, scope: hash('original'), batches: [], resources: [], started: true, activatedAt: 1 }
+  writeJson(file, original)
+  const before = fs.readFileSync(file)
+  const client = { scope: 'other', ready: () => { throw new Error('must not contact upstream') } }
+  const svc = new LegacyMigration({ dataDir: dir, client, journal: {} })
+  t.after(() => svc.stop())
+  svc.setPaused(false)
+  await svc.startAutomatically()
+  await svc.run()
+  assert.equal(svc.timer, null)
+  assert.deepEqual(svc.status(), { backend: 'openviking', migration: true, enabled: false,
+    reason: 'scope_mismatch', pendingCount: 0, running: false, lastError: null,
+    initialized: false, totalBatches: 0, completedBatches: 0, failedBatches: 0,
+    activated: false, readyForCutover: false })
+  await assert.rejects(svc.start(), { code: 'migration_scope_mismatch' })
+  await assert.rejects(svc.activate(null), { code: 'migration_scope_mismatch' })
+  assert.deepEqual(fs.readFileSync(file), before)
+  const restored = new LegacyMigration({ dataDir: dir, client: { scope: 'original' }, journal: {}, autoResume: false })
+  t.after(() => restored.stop())
+  assert.equal(restored.status().activated, true)
+  assert.equal(restored.status().enabled, true)
+  assert.deepEqual(fs.readFileSync(file), before)
+  const coexist = new LegacyMigration({ dataDir: dir, client, journal: {}, coexistence: true })
+  t.after(() => coexist.stop())
+  assert.throws(() => coexist.status(), { code: 'migration_scope_mismatch' })
+  assert.equal(coexist.blocksNativeWrites(), true)
+  await coexist.checkSource()
+  assert.deepEqual(fs.readFileSync(file), before)
 })
 
 function seededMigration(dir, middleStatus = 'pending') {

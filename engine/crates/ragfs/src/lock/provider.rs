@@ -276,6 +276,10 @@ impl FilesystemPathLockProvider {
         }
         match result {
             Ok(data) => Ok(Some(data)),
+            Err(crate::core::Error::WouldBlock(_)) => Err(PathLockError::Busy {
+                lock_path: lock_path.to_string(),
+                operation: "read".to_string(),
+            }),
             Err(e) => {
                 if matches!(
                     e,

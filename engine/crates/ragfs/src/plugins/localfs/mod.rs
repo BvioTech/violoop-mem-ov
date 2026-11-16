@@ -94,6 +94,58 @@ pub struct LocalFileSystem {
 }
 
 impl LocalFileSystem {
+    /// Windows enforces byte-range locks even for reads. Coordinate token
+    /// snapshots with CAS writers, allowing a short bounded wait for their
+    /// in-place write/fsync; never turn transient contention into corrupt data.
+    fn lock_file(
+        file: fs::File,
+        kind: filelocks::LockKind,
+        operation: &str,
+    ) -> Result<filelocks::FileLock> {
+        #[cfg(not(windows))]
+        return filelocks::LockOptions::new()
+            .backend(filelocks::LockBackend::Fcntl)
+            .lock(file, kind, filelocks::LockMode::NonBlocking)
+            .map_err(|error| Self::map_lock_error(operation, &error.to_string()));
+
+        #[cfg(windows)]
+        {
+            let started = std::time::Instant::now();
+            loop {
+                let handle = file.try_clone().map_err(|e| {
+                    Error::plugin(format!("failed to clone file for {operation}: {e}"))
+                })?;
+                match filelocks::LockOptions::new()
+                    .backend(filelocks::LockBackend::Fcntl)
+                    .lock(handle, kind, filelocks::LockMode::NonBlocking)
+                {
+                    Ok(lock) => return Ok(lock),
+                    Err(error) => {
+                        if matches!(error, filelocks::Error::WouldBlock)
+                            && started.elapsed() < std::time::Duration::from_millis(250)
+                        {
+                            std::thread::sleep(std::time::Duration::from_millis(2));
+                            continue;
+                        }
+                        return Err(Self::map_lock_error(operation, &error.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    fn read_lock_token(local_path: PathBuf, virtual_path: &str) -> Result<Vec<u8>> {
+        use std::io::Read;
+        let file = fs::File::open(&local_path).map_err(|e| Self::map_error(virtual_path, e))?;
+        let mut lock = Self::lock_file(file, filelocks::LockKind::Shared, "read lock token")?;
+        let mut data = Vec::new();
+        lock.file_mut()
+            .read_to_end(&mut data)
+            .map_err(|e| Self::map_error(virtual_path, e))?;
+        Ok(data)
+    }
+
     /// Create a new LocalFileSystem
     ///
     /// # Arguments
@@ -240,14 +292,7 @@ impl LocalFileSystem {
             Err(Error::NotFound(_)) => return Ok(false),
             Err(e) => return Err(e),
         };
-        let mut lock = filelocks::LockOptions::new()
-            .backend(filelocks::LockBackend::Fcntl)
-            .lock(
-                file,
-                filelocks::LockKind::Exclusive,
-                filelocks::LockMode::NonBlocking,
-            )
-            .map_err(|e| Self::map_lock_error("compare_and_write", &e.to_string()))?;
+        let mut lock = Self::lock_file(file, filelocks::LockKind::Exclusive, "compare_and_write")?;
         let file = lock.file_mut();
         if !Self::open_file_matches_path(&file, &local_path)? {
             return Ok(false);
@@ -294,14 +339,7 @@ impl LocalFileSystem {
             Err(Error::NotFound(_)) => return Ok(false),
             Err(e) => return Err(e),
         };
-        let mut lock = filelocks::LockOptions::new()
-            .backend(filelocks::LockBackend::Fcntl)
-            .lock(
-                file,
-                filelocks::LockKind::Exclusive,
-                filelocks::LockMode::NonBlocking,
-            )
-            .map_err(|e| Self::map_lock_error("compare_and_remove", &e.to_string()))?;
+        let mut lock = Self::lock_file(file, filelocks::LockKind::Exclusive, "compare_and_remove")?;
         let file = lock.file_mut();
         if !Self::open_file_matches_path(&file, &local_path)? {
             return Ok(false);
@@ -334,6 +372,10 @@ impl LocalFileSystem {
     fn map_error(path: &str, error: std::io::Error) -> Error {
         if error.kind() == std::io::ErrorKind::NotFound {
             return Error::NotFound(path.to_string());
+        }
+        #[cfg(windows)]
+        if matches!(error.raw_os_error(), Some(32 | 33)) {
+            return Error::would_block(format!("file lock contention at '{path}': {error}"));
         }
         Error::plugin(format!("failed to read file: {}", error))
     }
@@ -834,6 +876,16 @@ impl FileSystem for LocalFileSystem {
         }
 
         // Read file
+        #[cfg(windows)]
+        let data = if local_path.file_name().and_then(|n| n.to_str()).is_some_and(
+            crate::core::internal_names::is_hidden_runtime_lock_name,
+        ) {
+            let path = path.to_string();
+            Self::run_blocking_fs(move || Self::read_lock_token(local_path, &path)).await?
+        } else {
+            fs::read(&local_path).map_err(|e| Self::map_error(path, e))?
+        };
+        #[cfg(not(windows))]
         let data = fs::read(&local_path).map_err(|e| Self::map_error(path, e))?;
 
         // Apply offset and size
@@ -1276,6 +1328,63 @@ mod tests {
             &dir.path().join("missing.txt")
         )
         .unwrap());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_token_read_waits_for_complete_cas_write() {
+        use std::io::{Seek, SeekFrom, Write};
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(".path.ovlock");
+        fs::write(&path, b"old-token").unwrap();
+        let writer_path = path.clone();
+        let (ready, wait) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            let file = fs::OpenOptions::new().read(true).write(true).open(writer_path).unwrap();
+            let mut lock = LocalFileSystem::lock_file(file, filelocks::LockKind::Exclusive, "test").unwrap();
+            lock.file_mut().set_len(0).unwrap();
+            ready.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            lock.file_mut().seek(SeekFrom::Start(0)).unwrap();
+            lock.file_mut().write_all(b"complete-new-token").unwrap();
+        });
+        wait.recv().unwrap();
+        let value = LocalFileSystem::read_lock_token(path, "/.path.ovlock").unwrap();
+        writer.join().unwrap();
+        assert_eq!(value, b"complete-new-token");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_cas_waits_for_token_reader() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(".path.ovlock");
+        fs::write(&path, b"old").unwrap();
+        let reader_path = path.clone();
+        let (ready, wait) = std::sync::mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let file = fs::File::open(reader_path).unwrap();
+            let _lock = LocalFileSystem::lock_file(file, filelocks::LockKind::Shared, "test").unwrap();
+            ready.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(40));
+        });
+        wait.recv().unwrap();
+        assert!(LocalFileSystem::compare_and_write_locked(path.clone(), b"old".to_vec(), b"new".to_vec()).unwrap());
+        reader.join().unwrap();
+        assert_eq!(fs::read(path).unwrap(), b"new");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_token_read_contention_is_bounded_and_retryable() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(".path.ovlock");
+        fs::write(&path, b"token").unwrap();
+        let file = fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        let _lock = LocalFileSystem::lock_file(file, filelocks::LockKind::Exclusive, "test").unwrap();
+        let started = std::time::Instant::now();
+        assert!(matches!(LocalFileSystem::read_lock_token(path, "/.path.ovlock"), Err(Error::WouldBlock(_))));
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 
     #[tokio::test]

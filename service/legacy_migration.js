@@ -93,8 +93,13 @@ class LegacyMigration {
   }
   validate() {
     const s = this.state
-    if (!s || s.version !== 1 || s.scope !== hash(this.client.scope) || !Array.isArray(s.batches) || !Array.isArray(s.resources)) {
-      throw new Error('Migration state is invalid or belongs to a different OpenViking scope')
+    if (!s || s.version !== 1 || typeof s.scope !== 'string' || !Array.isArray(s.batches) || !Array.isArray(s.resources)) {
+      throw new Error('Migration state is invalid')
+    }
+    if (s.scope !== hash(this.client.scope)) {
+      throw Object.assign(new Error('Migration state belongs to a different OpenViking scope'), {
+        code: 'migration_scope_mismatch', status: 409,
+      })
     }
     if (s.automaticRetryCount !== undefined && (!Number.isInteger(s.automaticRetryCount) || s.automaticRetryCount < 0 || s.automaticRetryCount > 3)) {
       throw new Error('Invalid migration automatic retry count')
@@ -190,8 +195,18 @@ class LegacyMigration {
   // wipe the whole native memory tree to rebuild migration staging. Any
   // other native write landing in that window would be destroyed by the
   // next reset, so no native write may be accepted until activation.
-  blocksNativeWrites() { return this.coexistence && !this.state?.activatedAt }
+  blocksNativeWrites() { return this.coexistence && (!!this.loadError || !this.state?.activatedAt) }
   status() {
+    // A receipt for another endpoint/account is not a failure of this native
+    // store. Retain it and keep migration fenced; never reset/replay legacy
+    // data into a different scope. Coexistence still requires a valid receipt
+    // before handing over ownership of the native tree.
+    if (this.loadError?.code === 'migration_scope_mismatch' && !this.coexistence) {
+      return { backend: 'openviking', migration: true, enabled: false, reason: 'scope_mismatch',
+        pendingCount: 0, running: false, lastError: null, initialized: false,
+        totalBatches: 0, completedBatches: 0, failedBatches: 0,
+        activated: false, readyForCutover: false }
+    }
     if (this.loadError) throw this.loadError
     let pendingCount
     if (!this.state) {
@@ -233,6 +248,7 @@ class LegacyMigration {
     return this.activating
   }
   async _activate(sourceRevision) {
+    if (this.loadError) throw this.loadError
     if (this.state?.activatedAt) return this.status()
     if (!await this.client.ready()) throw Object.assign(new Error('OpenViking is not ready'), { status: 503 })
     // Edge holds its routing fence while this synchronous source check and
@@ -248,7 +264,7 @@ class LegacyMigration {
     return this.status()
   }
   async checkSource() {
-    if (this.paused || this.stopped || this.running || this.starting || this.state?.started || this.state?.activatedAt) return
+    if (this.paused || this.stopped || this.loadError || this.running || this.starting || this.state?.started || this.state?.activatedAt) return
     this.starting = true
     try {
       if (!this.state?.batches.every(b => b.status === 'completed')) return

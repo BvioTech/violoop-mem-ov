@@ -374,7 +374,8 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     if (mode === 'recall' && pattern) throw fail('invalid_query', 'keywords are only supported by search')
     let q = query(body.query)
     const requested = integer(requestedLimit ?? body.limit, 10)
-    const limit = mode === 'recall' || pattern ? Math.min(requested, 10) : requested
+    // Automatic callers may fetch one extra candidate to replace the pinned profile.
+    const limit = mode === 'recall' ? Math.min(requested, 11) : pattern ? Math.min(requested, 10) : requested
     // No default score floor. Explicit caller thresholds remain wire-compatible.
     const minScore = body.minScore ?? body.minSim
     if (minScore !== undefined && !Number.isFinite(minScore)) throw fail('invalid_query', 'minScore must be finite')
@@ -580,7 +581,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
       }
       if (req.method === 'POST' && p === '/v2/migration/start') {
         try { return json(res, 202, await migration.start()) }
-        catch (e) { throw fail('migration_unavailable', e.message, 503) }
+        catch (e) { throw fail(e.code || 'migration_unavailable', e.message, e.status || 503) }
       }
       if (req.method === 'POST' && p === '/v2/ingests/lookup') return json(res, 200, await journal.lookup(await readJson(req)))
       if (req.method === 'POST' && p === '/v1/grep') return json(res, 200, await grepMemory(await readJson(req)))
