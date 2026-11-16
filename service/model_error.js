@@ -28,7 +28,9 @@ function modelError(error) {
   const billing = /\b(?:credit_exhausted|budget_exceeded|insufficient_balance|ExceededBudget)\b|insufficient\s+(?:balance|credit)/i.test(text)
   const status = objects.map(o => Number(o.upstream_status ?? o.upstreamStatus ?? o.status_code ?? o.statusCode ?? o.http_status ?? o.status))
     .find(s => PERMANENT.has(s))
-  const protocolStatus = [...text.matchAll(/\b(?:HTTP(?:\s+status)?|status(?:_code|\s+code)?|error\s+code)['"]?\s*[:=]?\s*['"]?(\d{3})\b/gi)]
+  // Whitespace before/after a separator must not overlap when it is absent:
+  // `\s*[:=]?\s*` explores every split of a long space run on a failed match.
+  const protocolStatus = [...text.matchAll(/\b(?:HTTP(?:\s+status)?|status(?:_code|\s+code)?|error\s+code)['"]?\s*(?:[:=]\s*)?['"]?(\d{3})\b/gi)]
     .map(m => Number(m[1])).find(s => PERMANENT.has(s))
   const permanent = BLOCKING.has(code) || auth || billing || !!status || !!protocolStatus
     || /\b(?:PermissionDeniedError|BadRequestError|permission_denied|invalid_request_error|context_length_exceeded|model_not_found)\b/i.test(text)
