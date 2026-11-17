@@ -3,27 +3,11 @@ const path = require('path')
 const { readLegacySnapshot, hash, legacyFacts } = require('./legacy_source')
 const { writeJson } = require('./durable_json')
 const { startStage, appendTiming } = require('./migration_timing')
+const { modelError } = require('./model_error')
 
 const SKIPPED_STATUSES = new Set(['failed'])
 const AUTOMATIC_RETRY_DELAYS_MS = Object.freeze([10000, 30000, 60000])
-const PERMANENT_HTTP_STATUSES = new Set([400, 401, 403, 404, 405, 413, 415, 422])
-
-function permanentFailure(error) {
-  if (!error) return false
-  if (typeof error === 'object') {
-    const status = Number(error.upstreamStatus ?? error.status_code ?? error.statusCode ?? error.http_status ?? error.status)
-    if (PERMANENT_HTTP_STATUSES.has(status)) return true
-    for (const key of ['message', 'error', 'code', 'type']) {
-      if (typeof error[key] === 'string' && permanentFailure(error[key])) return true
-    }
-    return false
-  }
-  const message = String(error)
-  // Only explicit protocol errors: ordinary prose/numbers are not HTTP codes.
-  const status = message.match(/\b(?:HTTP(?:\s+status)?|status(?:_code|\s+code)?|error\s+code)['"]?\s*[:=]?\s*['"]?(\d{3})\b/i)
-  return (status && PERMANENT_HTTP_STATUSES.has(Number(status[1])))
-    || /\b(?:AuthenticationError|PermissionDeniedError|BadRequestError|invalid_api_key|authentication_error|permission_denied|invalid_request_error|context_length_exceeded|model_not_found)\b/i.test(message)
-}
+const permanentFailure = error => modelError(error).retryable === false
 
 class LegacyMigration {
   constructor({ dataDir, sourceFile = path.join(dataDir, 'graph.db'), client, journal, pollMs = 3000, autoResume = true,
@@ -125,6 +109,7 @@ class LegacyMigration {
     return { batch: index + 1, batchId: b.id, status: attempt.status,
       error: attempt.error || attempt.status, recordedAt: attempt.issueRecordedAt,
       taskId: attempt.taskId || null, ingestId: attempt.ingestId || null,
+      ...(attempt.errorInfo ? { errorInfo: attempt.errorInfo } : {}),
       sourceTokens: b.tokens, sourceGroups: b.groups,
       attempt: attempt.attempt || 0, trigger: attempt.trigger || 'primary' }
   }
@@ -163,12 +148,12 @@ class LegacyMigration {
       // The new session changes the ingest identity, not the evidence or its time.
       writeJson(path.join(this.dir, 'retries', b.id, attempt + '.json'), body)
       const previous = { attempt: b.attempt || 0, trigger: b.trigger || 'primary', status: b.status }
-      for (const key of ['ingestId', 'taskId', 'error', 'issueRecordedAt', 'startedAt', 'finishedAt', 'lastAttemptError', 'retryChecksum', 'retryable']) {
+      for (const key of ['ingestId', 'taskId', 'error', 'errorInfo', 'issueRecordedAt', 'startedAt', 'finishedAt', 'lastAttemptError', 'retryChecksum', 'retryable']) {
         if (b[key] !== undefined) previous[key] = b[key]
       }
       b.attempts ||= []
       b.attempts.push(previous)
-      for (const key of ['ingestId', 'taskId', 'error', 'issueRecordedAt', 'startedAt', 'finishedAt', 'lastAttemptError', 'timingRecorded', 'retryable']) delete b[key]
+      for (const key of ['ingestId', 'taskId', 'error', 'errorInfo', 'issueRecordedAt', 'startedAt', 'finishedAt', 'lastAttemptError', 'timingRecorded', 'retryable']) delete b[key]
       Object.assign(b, { attempt, trigger, retryChecksum: hash(JSON.stringify(body)), status: 'pending' })
     }
     this.state.automaticRetryCount = this.automaticRetryCount() + (automatic ? 1 : 0)
@@ -184,6 +169,7 @@ class LegacyMigration {
   lastIssue() {
     const b = this.state?.batches.filter(b => SKIPPED_STATUSES.has(b.status)).at(-1)
     return b ? { message: `Migration batch ${b.id} skipped (${b.status}): ${b.error || b.status}`,
+      ...(b.errorInfo ? { ...b.errorInfo } : {}),
       at: b.issueRecordedAt || null } : null
   }
   // While coexistence is active and unactivated, resetMigrationMemory() may
@@ -332,10 +318,11 @@ class LegacyMigration {
       }
       this.validate()
       let retriedBatches = 0
-      const runnable = this.state.batches.some(b => b.status !== 'completed' && !SKIPPED_STATUSES.has(b.status))
-      if (!runnable) {
-        if (this.state.batches.some(b => b.status === 'failed')) retriedBatches = this.prepareRetries('manual-retry')
-        else { if (this.coexistence) this.resume(); return { started: false, reason: 'complete' } }
+      // Explicit Start after repairing credentials retries failed work as well
+      // as untouched pending batches. Completed receipts are never replayed.
+      if (this.state.batches.some(b => b.status === 'failed')) retriedBatches = this.prepareRetries('manual-retry')
+      if (!this.state.batches.some(b => b.status !== 'completed')) {
+        if (this.coexistence) this.resume(); return { started: false, reason: 'complete' }
       }
       this.state.phase ||= 'primary' // Resume in-progress states from older releases.
       this.state.started = true
@@ -366,9 +353,15 @@ class LegacyMigration {
       b.status = receipt.status
       const taskError = receipt.task?.error || receipt.task?.result?.error || receipt.error
       b.error = (typeof taskError === 'object' ? JSON.stringify(taskError) : taskError) || receipt.status
-      if (receipt.status === 'failed') b.retryable = ![receipt.task, receipt.task?.result, taskError].some(permanentFailure)
+      if (receipt.status === 'failed') {
+        b.errorInfo = modelError({ error: taskError, result: receipt.task?.result })
+        b.retryable = b.errorInfo.retryable && !permanentFailure(receipt.task)
+      }
       b.finishedAt = Date.now()
       this.save()
+      if (b.errorInfo?.requiresAction) {
+        throw Object.assign(new Error(b.error), { pauseMigration: true, ...b.errorInfo })
+      }
       if (SKIPPED_STATUSES.has(b.status)) return true
       throw Object.assign(new Error(`Migration batch ${b.id}: ${b.error}`), { pauseMigration: true })
     }
@@ -423,7 +416,8 @@ class LegacyMigration {
         try {
           if (await this.step(b)) { this.lastError = null; this.state.lastError = null; continue }
         } catch (e) {
-          this.lastError = this.state.lastError = { message: e.message, at: Date.now() }
+          this.lastError = this.state.lastError = { message: e.message, at: Date.now(),
+            ...(e.requiresAction ? modelError(e) : {}) }
           b.lastAttemptError = this.lastError
           if (e.pauseMigration || permanentFailure(e)) this.state.started = false
           this.save()

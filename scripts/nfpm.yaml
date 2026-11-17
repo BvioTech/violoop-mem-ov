@@ -83,6 +83,8 @@ contents:
     dst: /opt/violoop-mem-ov/openviking_runtime.js
   - src: ./service/model_gateway.js
     dst: /opt/violoop-mem-ov/model_gateway.js
+  - src: ./service/model_error.js
+    dst: /opt/violoop-mem-ov/model_error.js
   - src: ./service/embedding_api.js
     dst: /opt/violoop-mem-ov/embedding_api.js
   - src: ./service/embedding_queue.js

@@ -118,6 +118,8 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
         const finishLlm = (status, fields = {}) => { if (!llmSettled) { llmSettled = true; llmDone?.(status, fields) } }
         const forward = http.request(device, { method: 'POST', headers: {
           authorization: `Bearer ${token}`, 'content-type': 'application/json', 'content-length': payload.length,
+          ...Object.fromEntries(['x-violoop-timing-task', 'x-violoop-timing-run'].filter(k =>
+            typeof req.headers[k] === 'string' && /^[\w-]{1,128}$/.test(req.headers[k])).map(k => [k, req.headers[k]])),
         } }, upstream => {
           if (timing) {
             const responseChunks = []; let responseBytes = 0
@@ -126,13 +128,17 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
               let metadata = {}
               if (responseBytes <= 2 * 1024 * 1024) try {
                 const result = JSON.parse(Buffer.concat(responseChunks))
-                metadata = { model: result.model, usage: result.usage, finishReason: result.choices?.[0]?.finish_reason }
+                const info = require('./model_error').modelError(result.error || {})
+                metadata = { model: result.model || info.model, usage: result.usage, finishReason: result.choices?.[0]?.finish_reason,
+                  ...(result.error ? { error: info } : {}), ...(result.violoop ? { requestId: result.violoop.request_id } : {}) }
               } catch { /* Timing never changes the response. */ }
               finishLlm(upstream.statusCode === 200 ? 'ok' : 'error', { httpStatus: upstream.statusCode, ...metadata })
             })
             upstream.on('error', () => finishLlm('error'))
           }
-          res.writeHead(upstream.statusCode, { 'content-type': 'application/json' })
+          const requestId = upstream.headers['x-request-id']
+          res.writeHead(upstream.statusCode, { 'content-type': 'application/json',
+            ...(typeof requestId === 'string' && /^[\w-]{1,128}$/.test(requestId) ? { 'x-request-id': requestId } : {}) })
           upstream.pipe(res)
         })
         forward.setTimeout(180000, () => forward.destroy(new Error('device model request timed out')))
