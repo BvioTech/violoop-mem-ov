@@ -16,6 +16,10 @@ version_schema: semver
 section: utils
 priority: optional
 maintainer: doctor <doctor@bvio.ai>
+homepage: https://github.com/BvioTech/violoop-mem-ov
+# SPDX 标识。许可证原文在 /opt/violoop-mem-ov/LICENSE,按 Debian 惯例的声明
+# 在 /usr/share/doc/violoop-mem-ov/copyright(deploy/copyright)。
+license: AGPL-3.0-only
 description: |
   Violoop memory service with an OpenViking backend and device-compatible
   recall/search/ingest APIs over Unix socket. Bundles and supervises the native
@@ -125,6 +129,11 @@ contents:
   - src: ./engine/licenses
     dst: /opt/violoop-mem-ov/engine-licenses
     type: tree
+  # Debian 标准位置的许可证声明(DEP-5),供按路径扫描的工具识别。
+  - src: ./deploy/copyright
+    dst: /usr/share/doc/violoop-mem-ov/copyright
+    file_info:
+      mode: 0644
   - src: ./deploy/openviking-adapter.yaml
     dst: /opt/violoop-mem-ov/openviking-adapter.yaml
   - src: ./deploy/ov.conf.example
