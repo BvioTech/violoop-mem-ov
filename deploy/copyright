@@ -1,0 +1,55 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: violoop-mem-ov
+Source: https://github.com/BvioTech/violoop-mem-ov
+Comment: The complete corresponding source for this package version is the
+ git tag v<package version> in the repository above, together with that
+ release's source archive (also shipped in this package as
+ /opt/violoop-mem-ov/openviking-python/violoop-mem-ov-source.tar.gz).
+ See also /opt/violoop-mem-ov/NOTICE.md and
+ /opt/violoop-mem-ov/engine-licenses/. The running service answers
+ GET /license with the same information.
+
+Files: *
+Copyright: BvioTech
+License: AGPL-3.0-only
+
+Files: opt/violoop-mem-ov/openviking-python/*
+Copyright: respective authors
+License: various
+Comment: Third-party Python packages installed next to the OpenViking engine.
+ Each keeps its own license in its package or *.dist-info directory; the
+ pinned versions are listed in requirements-locked.txt in this directory.
+
+Files: opt/violoop-mem-ov/openviking-python/openviking/*
+ opt/violoop-mem-ov/engine-licenses/*
+Copyright: ByteDance and OpenViking contributors
+License: AGPL-3.0-only
+Comment: OpenViking source snapshot
+ 8e3383878fb0bb6f8d977178141d2c49339b0fe8 from
+ https://github.com/volcengine/OpenViking with VioLoop integration changes
+ (see NOTICE.md and violoop-source-manifest.json). Upstream declares
+ "AGPL-3.0" and ships the version 3 text without an "or later" grant. The
+ upstream license is also installed as
+ /opt/violoop-mem-ov/openviking-python/OPENVIKING-LICENSE; notices of
+ bundled and omitted upstream components are under engine-licenses/.
+
+Files: opt/violoop-mem-ov/node_modules/*
+Copyright: respective authors
+License: various
+Comment: Each npm dependency ships its own license file in its directory.
+
+License: AGPL-3.0-only
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU Affero General Public License as published by
+ the Free Software Foundation, version 3 of the License.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+ for more details.
+ .
+ The complete text of the license is installed at
+ /opt/violoop-mem-ov/LICENSE.
+
+License: various
+ See the license files shipped inside each bundled component's directory.
