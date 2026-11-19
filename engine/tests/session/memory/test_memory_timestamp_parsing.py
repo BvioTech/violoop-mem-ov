@@ -1,7 +1,10 @@
 # Copyright (c) 2026 Beijing Volcano Engine Technology Co., Ltd.
 # SPDX-License-Identifier: AGPL-3.0
 
+import json
+from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -16,6 +19,10 @@ from openviking.session.memory.session_extract_context_provider import (
 )
 from openviking.session.memory.utils import MemoryFileUtils
 from openviking_cli.session.user_id import UserIdentifier
+from openviking_cli.utils.config.open_viking_config import (
+    OpenVikingConfig,
+    OpenVikingConfigSingleton,
+)
 
 
 def _message(*, created_at: str, role: str = "user", text: str = "hello") -> Message:
@@ -209,3 +216,24 @@ def test_deserialize_full_parses_memory_metadata_timestamps_with_z_suffix():
     assert result.extra_fields is not None
     assert result.extra_fields["created_at"].isoformat() == "2026-04-17T01:26:14.481000+00:00"
     assert result.extra_fields["updated_at"].isoformat() == "2026-04-17T09:10:11.123456+08:00"
+
+
+@pytest.mark.asyncio
+async def test_prefetch_serializes_existing_profile_timestamps(monkeypatch):
+    monkeypatch.setattr(OpenVikingConfigSingleton, "_instance", OpenVikingConfig.from_dict({}))
+    uri = "viking://~/memories/profile.md"
+    timestamps = {
+        "created_at": "2026-11-19T09:30:00.123456+08:00",
+        "updated_at": "2026-11-19T09:35:00.654321+08:00",
+    }
+    profile = MemoryFileUtils.write(MemoryFile(content="# 用户", extra_fields=timestamps))
+    viking_fs = SimpleNamespace(read_file=AsyncMock(return_value=profile))
+    provider = SessionExtractContextProvider(messages=[], viking_fs=viking_fs)
+
+    messages = []
+    await provider._append_structured_read_result(messages, call_id=1, file_uri=uri)
+
+    result = json.loads(messages[0]["content"])["result"]
+    for key, timestamp in timestamps.items():
+        assert result[key] == timestamp
+        assert isinstance(provider.read_file_contents[uri].extra_fields[key], datetime)
