@@ -26,6 +26,12 @@ function uri(value) {
   if (value === 'viking://') return value
   return value.replace(/\/(\.abstract|\.overview)\.md$/, '').replace(/\/$/, '')
 }
+function projectTag(projectId) {
+  if (typeof projectId !== 'string' || !/^[a-z0-9_-]{1,100}$/i.test(projectId)) {
+    throw fail('invalid_query', 'A valid projectId is required')
+  }
+  return 'project_id=' + projectId.toLowerCase()
+}
 function stable(value) {
   if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']'
   if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + stable(value[k])).join(',') + '}'
@@ -376,6 +382,17 @@ function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 80
     const budgetChars = previewBudget(body.budgetChars, automatic ? recallMaxChars : searchMaxChars)
     const pattern = keywordsPattern(body.keywords)
     const options = searchOptions(body, client, { automatic })
+    if (automatic && body.excludeUris !== undefined) {
+      if (!Array.isArray(body.excludeUris) || body.excludeUris.length > 50) {
+        throw fail('invalid_query', 'excludeUris must be an array of at most 50 file URIs')
+      }
+      const excluded = [...new Set(body.excludeUris.map(value =>
+        uri(value).replace('viking://~/', `viking://user/${client.user}/`)))]
+      if (excluded.length) {
+        const filter = { op: 'must_not', field: 'uri', conds: excluded, para: '-d=0' }
+        options.filter = options.filter ? { op: 'and', conds: [options.filter, filter] } : filter
+      }
+    }
     if (automatic && pattern) throw fail('invalid_query', 'keywords are only supported by search')
     let q = query(body.query)
     const requested = integer(requestedLimit ?? body.limit, 10)
@@ -563,7 +580,25 @@ function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 80
       }
       if (req.method === 'POST' && p === '/v1/memory-entries') {
         const body = await readJson(req), plan = manual.planMemory(body, client)
-        return json(res, 201, await mutate('create', plan.uri, { content: manual.serializeMemory(plan, body.content) }))
+        const tags = body.projectId === undefined ? undefined : [projectTag(body.projectId)]
+        return json(res, 201, await mutate('create', plan.uri, { content: manual.serializeMemory(plan, body.content), tags }))
+      }
+      if (req.method === 'POST' && p === '/v1/project-memories/list') {
+        const body = await readJson(req)
+        const tag = projectTag(body.projectId)
+        const offset = integer(body.offset, 0, 100000000)
+        const limit = integer(body.limit, 20)
+        if (!limit) throw fail('invalid_query', 'limit must be positive')
+        const result = await nativeRetrieve('', { mode: 'find', offset, limit: limit + 1,
+          targetUri: 'viking://~/memories', contextType: 'memory', level: 2, tags: [tag] })
+        const items = flatten(result, limit, 0)
+        const abstracts = body.includePreview === true
+          ? new Map(result.memories.map(hit => [hit.uri, hit.abstract || '']))
+          : null
+        return json(res, 200, { items: items.map(item => ({
+          uri: item.uri, key: item.uri, title: item.title,
+          ...(abstracts ? { abstract: abstracts.get(item.uri) } : {}),
+        })), nextOffset: result.memories.length > limit ? offset + limit : null })
       }
       const panelMutation = p.match(/^\/v1\/memory-entries\/(.+)$/)
       if (req.method === 'PATCH' && panelMutation) {

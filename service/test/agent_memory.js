@@ -11,7 +11,7 @@ const { searchOptions } = require('../openviking_agent')
 
 const key = 'viking://user/test/memories/preferences/agent.md'
 const other = 'viking://user/test/memories/events/outside.md'
-const records = new Map(), calls = []
+const records = new Map(), projectTags = new Map(), calls = []
 let upstream, server, app, base, rejectRefresh = false, searchKey = key
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-agent-'))
 const hit = (uri, level = 2) => ({ uri, level, score: 0.9, abstract: '旅行偏好', context_type: 'memory', tags: ['memory_type=preferences', 'topic=travel'] })
@@ -25,6 +25,7 @@ before(async () => {
     if (u.pathname === '/api/v1/content/write') {
       if (body.mode === 'create' && records.has(body.uri)) return send(409, 'already exists')
       records.set(body.uri, body.content)
+      if (body.tags?.some(tag => tag.startsWith('project_id='))) projectTags.set(body.uri, body.tags)
       if (rejectRefresh) return send(500, 'index refresh failed')
       return send(200, { uri: body.uri, mode: body.mode, vector_status: 'queued', overview_status:'complete' })
     }
@@ -44,9 +45,17 @@ before(async () => {
       return send(200, [...entries.values()])
     }
     if (u.pathname === '/api/v1/fs' && req.method === 'DELETE') { records.delete(uri); return send(200, { uri, estimated_deleted_count:1, semantic_status:'queued' }) }
-    if (u.pathname === '/api/v1/fs/attrs') return send(200, { attrs:{ tags:['topic=travel'], memory:{ memory_type:'preferences', created_at:'2026-01-01T00:00:00Z', source_extraction_id:'source-123', content:'must not leak whole file' } } })
+    if (u.pathname === '/api/v1/fs/attrs') return send(200, { attrs:{ tags:projectTags.get(uri) || ['topic=travel'], memory:{ memory_type:'preferences', created_at:'2026-01-01T00:00:00Z', source_extraction_id:'source-123', content:'must not leak whole file' } } })
     if (u.pathname === '/api/v1/search/grep') return send(200, { matches:[{ uri:searchKey, line:1, content:'travel evidence' }, { uri:other, line:1, content:'out of time range' }, { uri:'viking://user/test/memories/.overview.md', line:1, content:'wrong level' }] })
     if (u.pathname.startsWith('/api/v1/search/')) {
+      if (body.query === '' && body.tags?.[0]?.startsWith('project_id=')) {
+        const matches = [...projectTags].filter(([uri, tags]) => records.has(uri) && tags.includes(body.tags[0]))
+        const page = matches.slice(body.offset, body.offset + body.limit)
+        return send(200, { memories: page.map(([uri]) => ({ ...hit(uri), abstract: records.get(uri).split('\n')[0] })), resources: [], skills: [] })
+      }
+      if (body.filter?.op === 'must_not' && body.filter.field === 'uri' && body.filter.conds.includes(searchKey)) {
+        return send(200, { memories: [hit(other)], resources: [], skills: [] })
+      }
       if (body.query === '') return send(200, { memories:body.level === 2 ? [hit(searchKey)] : [], resources:[], skills:[] })
       return send(200, { memories:[hit(searchKey)], resources:[], skills:[], provenance:[{ query:'rewritten travel', matched_contexts:[{ uri:searchKey, tier:'L2', score:0.9, match_reason:'semantic match' }] }] })
     }
@@ -316,4 +325,40 @@ test('hybrid filter-only eligibility never receives a time-decay ranking argumen
   assert.equal(queries.find(c=>c.body.query==='travel').body.events_time_decay_protection,'30d')
   assert.ok(queries.some(c=>c.body.query===''))
   for(const call of queries.filter(c=>c.body.query==='')) assert.equal(Object.hasOwn(call.body,'events_time_decay_protection'),false)
+})
+
+test('project writes share a paginated catalogue with the agent and exclude only recalled URI candidates', async () => {
+  const projectId = 'prj_test'
+  const agentUri = 'viking://user/test/memories/entities/prj_test/agent.md'
+  const created = await request('POST', '/v1/memory-entries', { projectId, memoryType: 'entities',
+    category: projectId, name: 'manual', content: 'Manual project entry' })
+  assert.equal(created.status, 201)
+  assert.equal((await request('POST', '/v1/memories', {
+    key: agentUri, content: 'Agent project entry', tags: ['project_id=' + projectId],
+  })).status, 201)
+  const list = '/v1/project-memories/list'
+  const first = await request('POST', list, { projectId, offset: 0, limit: 1 })
+  assert.equal(first.status, 200)
+  assert.equal(first.body.items[0].uri, created.body.uri)
+  assert.equal(first.body.items[0].abstract, undefined)
+  assert.equal(first.body.nextOffset, 1)
+  const second = await request('POST', list, { projectId, offset: first.body.nextOffset, limit: 1, includePreview: true })
+  assert.equal(second.body.items[0].uri, agentUri)
+  assert.equal(second.body.items[0].abstract, 'Agent project entry')
+  assert.equal(second.body.nextOffset, null)
+  const change = await request('PATCH', '/v1/memories/' + encodeURIComponent(agentUri),
+    { oldText: 'Agent', newText: 'Updated', tags: ['topic=deployment'] })
+  assert.equal(change.status, 200)
+  assert.deepEqual(projectTags.get(agentUri), ['topic=deployment', 'project_id=' + projectId])
+
+  const previous = searchKey
+  searchKey = agentUri
+  try {
+    const recall = await request('POST', '/v2/recall', { text: 'project deployment details', maxEntities: 1, excludeUris: [agentUri] })
+    assert.equal(recall.body.results[0].uri, other)
+    const find = calls.findLast(c => c.path === '/api/v1/search/find')
+    assert.deepEqual(find.body.filter, { op: 'must_not', field: 'uri', conds: [agentUri], para: '-d=0' })
+    const search = await request('POST', '/v1/search', { query: 'deployment', limit: 1 })
+    assert.equal(search.body.results[0].uri, agentUri)
+  } finally { searchKey = previous }
 })

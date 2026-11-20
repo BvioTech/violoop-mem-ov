@@ -2020,6 +2020,7 @@ class VikingVectorIndexBackend:
         level: Optional[List[int]] = None,
         limit: int = 10,
         offset: int = 0,
+        order_by: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Metadata-only lookup scoped exactly like search_in_tenant.
 
@@ -2047,6 +2048,7 @@ class VikingVectorIndexBackend:
             limit=limit,
             offset=offset,
             output_fields=RETRIEVAL_OUTPUT_FIELDS,
+            **({"order_by": order_by} if order_by is not None else {}),
             ctx=ctx,
         )
 

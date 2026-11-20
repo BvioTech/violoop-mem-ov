@@ -62,7 +62,7 @@ class OpenVikingClient {
   }
 
   retrieve(query, { mode, limit, minScore, targetUri, sessionId, level, readContent = false,
-    tags, since, until, timeField, contextType, includeProvenance, filter, eventsTimeDecayProtection } = {}) {
+    tags, since, until, timeField, contextType, includeProvenance, filter, eventsTimeDecayProtection, offset } = {}) {
     const find = mode === 'recall' || mode === 'find'
     return this.request('POST', `/api/v1/search/${find ? 'find' : 'search'}`, {
       query, limit, read_content: readContent,
@@ -72,7 +72,7 @@ class OpenVikingClient {
       ...(sessionId && !find ? { session_id: sessionId } : {}),
       ...Object.fromEntries(Object.entries({ tags, since, until, time_field: timeField,
         events_time_decay_protection: eventsTimeDecayProtection,
-        context_type: contextType, include_provenance: includeProvenance, filter }).filter(([, v]) => v !== undefined)),
+        context_type: contextType, include_provenance: includeProvenance, filter, offset }).filter(([, v]) => v !== undefined)),
     })
   }
 
@@ -91,9 +91,10 @@ class OpenVikingClient {
 
   stat(uri) { return this.request('GET', '/api/v1/fs/stat?' + new URLSearchParams({ uri })) }
   attrs(uri) { return this.request('GET', '/api/v1/fs/attrs?' + new URLSearchParams({ uri })) }
-  writeMemory(uri, content, { mode, tags } = {}) {
+  writeMemory(uri, content, { mode, tags, wait = false } = {}) {
     return this.request('POST', '/api/v1/content/write', {
-      uri, content, mode, wait: false, ...(tags === undefined ? {} : { tags, tag_mode: 'replace' }),
+      uri, content, mode, wait, ...(wait ? { timeout: 90 } : {}),
+      ...(tags === undefined ? {} : { tags, tag_mode: 'replace' }),
     }, { timeoutMs: Math.max(this.timeoutMs, 120000) })
   }
   deleteMemory(uri) {

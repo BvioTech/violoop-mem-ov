@@ -116,6 +116,11 @@ function createMutations(client, invalidate) {
   return async function mutate(action, key, body = {}) {
     const target = memoryUri(key, client, { allowDisabledSingletonDelete: action === 'delete' })
     const normalizedTags = tags(body.tags)
+    const requestedProjectTag = normalizedTags?.find(tag => tag.startsWith('project_id='))
+    if (action === 'create' && requestedProjectTag &&
+        target.replace('viking://~/', `viking://user/${client.user}/`).startsWith(`viking://user/${client.user}/peers/`)) {
+      throw fail('Project memory must be in the shared user memories directory')
+    }
     if (action === 'create') text(body.content, 'content')
     if (action === 'update') { text(body.oldText, 'oldText'); text(body.newText, 'newText', true) }
     if (action === 'replace') {
@@ -145,7 +150,21 @@ function createMutations(client, invalidate) {
             content = original.slice(0, start) + body.newText + original.slice(start + body.oldText.length)
             text(content, 'resulting content')
           }
-          result = await client.writeMemory(target, content, { mode: action === 'create' ? 'create' : 'replace', tags: normalizedTags })
+          let writeTags = normalizedTags
+          if (action !== 'create' && writeTags !== undefined) {
+            const attrs = await client.attrs(target)
+            const existingProjectTag = attrs?.attrs?.tags?.find(tag => tag.startsWith('project_id='))
+            if (requestedProjectTag && requestedProjectTag !== existingProjectTag) {
+              throw fail('Editing a memory cannot change its project tag')
+            }
+            if (existingProjectTag && !requestedProjectTag) {
+              writeTags = tags([...writeTags, existingProjectTag])
+            }
+          }
+          result = await client.writeMemory(target, content, {
+            mode: action === 'create' ? 'create' : 'replace', tags: writeTags,
+            ...(action === 'create' && requestedProjectTag ? { wait: true } : {}),
+          })
         }
         return { backend: 'openviking', action, uri: target, key: target,
           ...(action === 'delete' ? { deleted: true } : {}), result,

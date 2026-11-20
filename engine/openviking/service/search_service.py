@@ -175,6 +175,7 @@ class SearchService:
         image_url: Optional[str] = None,
         events_time_decay_protection: Optional[str] = None,
         search_type: SearchType = "semantic",
+        offset: Optional[int] = None,
     ) -> Any:
         """Search without session context.
 
@@ -205,6 +206,7 @@ class SearchService:
             image_url=resolved_image_url,
             events_time_decay_protection=events_time_decay_protection,
             search_type=search_type,
+            **({"offset": offset} if offset is not None else {}),
         )
         return result
 

@@ -159,6 +159,39 @@ async def test_find_omits_content_when_read_is_not_requested(
     assert "content" not in response.json()["result"]["resources"][0]
 
 
+async def test_project_tag_find_pages_and_excludes_a_uri_before_the_limit(client):
+    paths = [f"viking://~/memories/entities/projects/{i}.md" for i in range(3)]
+    for index, uri in enumerate(paths):
+        response = await client.post("/api/v1/content/write", json={
+            "uri": uri,
+            "content": f"# Deployment note {index}\nUseful project context",
+            "mode": "create",
+            "tags": [f"project_id={'other' if index == 2 else 'example'}"],
+            "wait": True,
+        })
+        assert response.status_code == 200, response.text
+
+    endpoint = "/api/v1/search/find"
+    tag_filter = {
+        "query": "", "target_uri": "viking://~/memories",
+        "tags": ["project_id=example"], "level": 2, "limit": 1,
+    }
+    uris = []
+    for offset in range(3):
+        response = await client.post(endpoint, json={**tag_filter, "offset": offset})
+        assert response.status_code == 200, response.text
+        uris.extend(hit["uri"] for hit in response.json()["result"]["memories"])
+    assert len(uris) == 2
+    assert {uri.rsplit("/", 1)[-1] for uri in uris} == {"0.md", "1.md"}
+
+    response = await client.post(endpoint, json={
+        **tag_filter, "query": "deployment note",
+        "filter": {"op": "must_not", "field": "uri", "conds": [uris[0]], "para": "-d=0"},
+    })
+    assert response.status_code == 200, response.text
+    assert [hit["uri"] for hit in response.json()["result"]["memories"]] == uris[1:]
+
+
 async def test_find_keeps_hit_without_content_when_read_fails(
     client: httpx.AsyncClient, service, monkeypatch
 ):
