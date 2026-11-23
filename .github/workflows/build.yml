@@ -136,7 +136,7 @@ jobs:
           retention-days: 7
 
   release:
-    name: Publish Release and notify APT
+    name: Publish Release
     needs: build
     if: github.repository == 'BvioTech/violoop-mem-ov' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
@@ -169,36 +169,3 @@ jobs:
             --title "$GITHUB_REF_NAME" --generate-notes --prerelease="$PRERELEASE" \
             dist/*.deb dist/*.deb.sha256 dist/*-source.tar.gz dist/SHA256SUMS
           gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
-
-  notify-apt:
-    name: Notify APT repository
-    needs: release
-    if: github.repository == 'BvioTech/violoop-mem-ov' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Notify APT repository
-        env:
-          APT_WEBHOOK_SECRET: ${{ secrets.APT_WEBHOOK_SECRET }}
-          HOOK_URL: https://deb.violoop.ai/hook/release
-        run: |
-          node <<'JS'
-          const { createHmac } = require('node:crypto');
-          async function main() {
-            const secret = process.env.APT_WEBHOOK_SECRET;
-            if (!secret) throw new Error('Configure the APT_WEBHOOK_SECRET repository secret');
-            const body = JSON.stringify({ repo: process.env.GITHUB_REPOSITORY, tag: process.env.GITHUB_REF_NAME });
-            const signature = 'sha256=' + createHmac('sha256', secret).update(body).digest('hex');
-            const response = await fetch(process.env.HOOK_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': signature },
-              body,
-              signal: AbortSignal.timeout(30000),
-            });
-            if (response.status !== 202) {
-              throw new Error(`APT webhook returned ${response.status}: ${await response.text()}`);
-            }
-            console.log('APT sync accepted; check the APT package index for publication completion');
-          }
-          main().catch(error => { console.error(error.message); process.exitCode = 1; });
-          JS

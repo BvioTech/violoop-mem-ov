@@ -74,7 +74,10 @@ def validate_native_files(path: Path) -> None:
 
 def file_digest(path: Path, *, sync: bool = False) -> dict:
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
+    # Windows fsync uses _commit, which requires a writable file descriptor.
+    # Validation only reads snapshots; publication also flushes new files.
+    mode = "r+b" if sync and os.name == "nt" else "rb"
+    with path.open(mode) as stream:
         while chunk := stream.read(1024 * 1024):
             digest.update(chunk)
         if sync:

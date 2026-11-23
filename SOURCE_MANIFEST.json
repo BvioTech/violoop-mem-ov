@@ -18155,7 +18155,8 @@
         {
           "path": "openviking/server/routers/search.py",
           "sha256": "5ce47214d019c751f3362881a30d4e47b16f1c14f5b81b6f7fa4dcc6ffa93971",
-          "destination": "engine/openviking/server/routers/search.py"
+          "destination": "engine/openviking/server/routers/search.py",
+          "integration_sha256": "d509735eada76e55052a1bce1f1b0a11a9a83bf89fa79ad2f7818800497d5a64"
         },
         {
           "path": "openviking/server/routers/sessions.py",
@@ -18346,7 +18347,8 @@
         {
           "path": "openviking/service/search_service.py",
           "sha256": "b937f08edc9903fc949d49968bfaa9e58e73d6432cafbc9c60b4448d8b8dd1fd",
-          "destination": "engine/openviking/service/search_service.py"
+          "destination": "engine/openviking/service/search_service.py",
+          "integration_sha256": "3327bfedf82b3a3aeebf5ee4577f03a5c33e9678abc0ad588eb9523722c9846e"
         },
         {
           "path": "openviking/service/session_auto_commit.py",
@@ -18607,7 +18609,8 @@
         {
           "path": "openviking/session/memory/tools.py",
           "sha256": "2d7970855ef529561f7319d4a904bd76bd312d82282949fd62dc752ff6addbb2",
-          "destination": "engine/openviking/session/memory/tools.py"
+          "destination": "engine/openviking/session/memory/tools.py",
+          "integration_sha256": "67b8069551204797fa149b37d6c0eb5e264f9e74678f51d1c6fb532bd6c690bb"
         },
         {
           "path": "openviking/session/memory/utils/__init__.py",
@@ -19607,7 +19610,8 @@
         {
           "path": "openviking/storage/viking_fs/_semantic.py",
           "sha256": "ee1de274901fb569141b5a4f5adaa4d5404bf83315bd8ea3917060c75843e2fe",
-          "destination": "engine/openviking/storage/viking_fs/_semantic.py"
+          "destination": "engine/openviking/storage/viking_fs/_semantic.py",
+          "integration_sha256": "0e940c14d71b2fb4a85fd4725366377441defd25bdf35cafc6fe94b1b0e87904"
         },
         {
           "path": "openviking/storage/viking_fs/_snapshot.py",
@@ -19629,12 +19633,13 @@
           "path": "openviking/storage/viking_vector_index_backend.py",
           "sha256": "ee9620db3abd2b78beaef5a00438ef673285b5e7e10fb2c65e1fbcef8cd1d613",
           "destination": "engine/openviking/storage/viking_vector_index_backend.py",
-          "integration_sha256": "f5c8a3942905fe6e1a0c1d98649c73b01ddcaabe628bac449f071df52232fa36"
+          "integration_sha256": "a7d9ba68bfda0e9a61f7c38f97931ac44f67cea71716652e2c39ac5986193d6a"
         },
         {
           "path": "openviking/storage/vikingdb_manager.py",
           "sha256": "c9d6d8c805b9f6ec7ac7fc75fae611edb0b8f42236092f7114fd8ca77b2a0df1",
-          "destination": "engine/openviking/storage/vikingdb_manager.py"
+          "destination": "engine/openviking/storage/vikingdb_manager.py",
+          "integration_sha256": "4aa1314d7bb099ae2362498245e1e8688fe381d15ec80e4c3dc7ba6535559ed1"
         },
         {
           "path": "openviking/telemetry/__init__.py",
@@ -23322,7 +23327,8 @@
         {
           "path": "tests/server/test_api_search.py",
           "sha256": "94ab55aae29d3d6f6311062971c6dfadf9ac6914150d60a07da810b03f791fc2",
-          "destination": "engine/tests/server/test_api_search.py"
+          "destination": "engine/tests/server/test_api_search.py",
+          "integration_sha256": "12342e428e3d829c9a91e6c7e271ad3fe0ac7227db1a264206aef1670baf3847"
         },
         {
           "path": "tests/server/test_api_search_context.py",
@@ -23810,7 +23816,8 @@
         {
           "path": "tests/session/memory/test_memory_timestamp_parsing.py",
           "sha256": "85243ce3f828a4022f8da06c2f1d614ca3f06b8b541fe98897dd515542f5639e",
-          "destination": "engine/tests/session/memory/test_memory_timestamp_parsing.py"
+          "destination": "engine/tests/session/memory/test_memory_timestamp_parsing.py",
+          "integration_sha256": "f40f9d1c32f3f0b4393cbc997a60cf4cf33bdf16f38a90825772d72a05fc45c4"
         },
         {
           "path": "tests/session/memory/test_memory_tools.py",

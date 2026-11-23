@@ -2,7 +2,7 @@
 
 `npm start` launches the Node adapter and the in-repository OpenViking child. Source development resolves `.venv/bin/python` and `engine/`; installation keeps `/opt/violoop-mem-ov/server.js` and `/opt/violoop-mem-ov/openviking-python`, together with the existing systemd identity, Unix socket and state paths.
 
-For Debian 12 ARM64: install Node 24, Python 3.11, uv, native build prerequisites and nFPM; run `npm run setup -- --python 3.11 --bootstrap-rust`, `npm test`, `npm run test:integration`, then `npm run build:deb`. The latter builds the in-repository engine wheel, assembles its locked Python runtime, and builds the Debian package. It does not install, publish or contact the apt webhook. Use only the package built for the target Python/Node ABI.
+For Debian 12 ARM64: install Node 24, Python 3.11, uv, native build prerequisites and nFPM; run `npm run setup -- --python 3.11 --bootstrap-rust`, `npm test`, `npm run test:integration`, then `npm run build:deb`. The latter builds the in-repository engine wheel, assembles its locked Python runtime, and builds the Debian package. It does not install or publish. Use only the package built for the target Python/Node ABI.
 
 Models remain in the separate `violoop-mem-model` package. Optional remote migration embedding settings and Device model routing retain their existing protocol. Secret files are provisioned outside Git. The source archive and provenance manifest accompany the runtime; no second OpenViking checkout is required.
 

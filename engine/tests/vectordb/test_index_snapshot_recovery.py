@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0
 """Real native checkpoints: interrupted commits, corruption, and pruned WAL."""
 
+import hashlib
 import json
 import os
 import stat
@@ -22,6 +23,19 @@ META = {
     ],
 }
 INDEX = {"IndexName": "main", "VectorIndex": {"IndexType": "flat", "Distance": "l2"}}
+
+
+@pytest.mark.parametrize("sync", [False, True])
+def test_file_digest_flushes_without_changing_snapshot(tmp_path, sync):
+    file = tmp_path / "snapshot.data"
+    content = b"native snapshot\x00\xff"
+    file.write_bytes(content)
+
+    assert snapshot.file_digest(file, sync=sync) == {
+        "size": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }
+    assert file.read_bytes() == content
 
 
 def row(key, text):
