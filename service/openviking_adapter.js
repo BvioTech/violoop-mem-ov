@@ -5,9 +5,10 @@ const { createEntries } = require('./openviking_entries')
 const { validateVikingUri } = require('./openviking_uri')
 const { keywordsPattern, mergeSearch } = require('./hybrid_search')
 const { previewBudget, boundPreviews } = require('./retrieval_budget')
-const { searchOptions, createMutations, enrich, metadata, levelOf, canonical } = require('./openviking_agent')
+const { searchOptions, createMutations, enrich, metadata, levelOf, canonical, CORE_TAG } = require('./openviking_agent')
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024
+const MAX_CORE_MEMORIES = 20
 const TRIVIAL_RE = /^(continue|go on|next|ok(ay)?|yep|yes|no|sure|done|thx|thanks?|嗯+|哦+|好+的?|继续|行|对|是的?|可以|没事了?|不用了?|算了)[\s.!~。！？]*$/i
 const fail = (code, message, status = 400) => Object.assign(new Error(message), { code, status })
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -359,7 +360,35 @@ function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 80
   const entries = createEntries(client)
   const consolidation = new (require('./openviking_consolidation').MemoryConsolidation)(client, graph,
     { dataDir, invalidate: () => entries.invalidate() })
-  const nativeMutate = createMutations(client, () => entries.invalidate())
+  const canonicalUri = value => uri(value).replace('viking://~/', 'viking://user/' + client.user + '/')
+  async function findCoreMemories() {
+    const result = await nativeRetrieve('', { mode: 'find', targetUri: [
+      'viking://~/memories', 'viking://user/' + client.user + '/peers/' + client.actorPeer + '/memories',
+    ], tags: [CORE_TAG], level: 2, contextType: 'memory', limit: MAX_CORE_MEMORIES + 1 })
+    return [...new Set(flatten(result, MAX_CORE_MEMORIES + 1, 0).map(item => canonicalUri(item.uri)))]
+  }
+  async function listCoreMemories() {
+    const candidates = await findCoreMemories()
+    const items = (await Promise.all(candidates.map(async uri => {
+      try {
+        const stat = await client.stat(uri)
+        const value = stat.modTime ?? stat.mtime ?? stat.updated_at
+        return { uri, title: path.posix.basename(uri, '.md'),
+          updatedAt: typeof value === 'number' ? value * 1000 : Date.parse(value) || 0 }
+      } catch (err) {
+        if (err.upstreamStatus !== 404) throw err
+        return null
+      }
+    }))).filter(Boolean)
+      .sort((a, b) => b.updatedAt - a.updatedAt || a.uri.localeCompare(b.uri))
+    return { items: items.slice(0, MAX_CORE_MEMORIES), hasMore: items.length > MAX_CORE_MEMORIES, maxItems: MAX_CORE_MEMORIES }
+  }
+  let coreWrite = Promise.resolve()
+  const nativeMutate = createMutations(client, () => entries.invalidate(), async () => {
+    if ((await findCoreMemories()).length >= MAX_CORE_MEMORIES) {
+      throw fail('core_memory_limit', `Core memory limit reached (${MAX_CORE_MEMORIES}). Unmark a memory to make room.`, 409)
+    }
+  })
   const manual = require('./openviking_manual')
   const mutate = async (...args) => {
     if (migration.blocksNativeWrites()) {
@@ -368,9 +397,9 @@ function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 80
     const result = await nativeMutate(...args)
     // These API writes have already persisted the file when they return.
     // Indexing stays separate from the native vector-processing task.
-    graph.queueCompletion(hash('write:' + process.hrtime.bigint()), [
-      result.uri.replace('viking://~/', `viking://user/${client.user}/`),
-    ])
+    if (args[0] !== 'set_core') {
+      graph.queueCompletion(hash('write:' + process.hrtime.bigint()), [canonicalUri(result.uri)])
+    }
     return result
   }
   async function nativeRetrieve(q, options) {
@@ -522,6 +551,7 @@ function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 80
         return json(res, 202, graph.startSync())
       }
       if (req.method === 'GET') {
+        if (p === '/v1/core-memories') return json(res, 200, await listCoreMemories())
         if (p === '/v2/graph/status' && url.searchParams.get('view') === 'memory') {
           return json(res, 200, await graph.status())
         }
@@ -603,6 +633,13 @@ function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 80
         const tags = body.projectId === undefined ? undefined : [projectTag(body.projectId)]
         return json(res, 201, await mutate('create', plan.uri, { content: manual.serializeMemory(plan, body.content), tags }))
       }
+      if (req.method === 'PATCH' && p === '/v1/core-memories') {
+        const { key, core } = await readJson(req)
+        // The quota check and tag write must serialize across different files.
+        const job = coreWrite.catch(() => {}).then(() => mutate('set_core', key, { core }))
+        coreWrite = job
+        return json(res, 200, await job)
+      }
       if (req.method === 'POST' && p === '/v1/project-memories/list') {
         const body = await readJson(req)
         const tag = projectTag(body.projectId)
@@ -616,7 +653,7 @@ function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 80
           ? new Map(result.memories.map(hit => [hit.uri, hit.abstract || '']))
           : null
         return json(res, 200, { items: items.map(item => ({
-          uri: item.uri, key: item.uri, title: item.title,
+          uri: canonicalUri(item.uri), key: canonicalUri(item.uri), title: item.title,
           ...(abstracts ? { abstract: abstracts.get(item.uri) } : {}),
         })), nextOffset: result.memories.length > limit ? offset + limit : null })
       }

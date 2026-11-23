@@ -25,7 +25,7 @@ before(async () => {
     if (u.pathname === '/api/v1/content/write') {
       if (body.mode === 'create' && records.has(body.uri)) return send(409, 'already exists')
       records.set(body.uri, body.content)
-      if (body.tags?.some(tag => tag.startsWith('project_id='))) projectTags.set(body.uri, body.tags)
+      if (body.tags !== undefined) projectTags.set(body.uri, body.tags)
       if (rejectRefresh) return send(500, 'index refresh failed')
       return send(200, { uri: body.uri, mode: body.mode, vector_status: 'queued', overview_status:'complete' })
     }
@@ -55,11 +55,18 @@ before(async () => {
     }
     if (u.pathname === '/api/v1/fs' && req.method === 'DELETE') { records.delete(uri); return send(200, { uri, estimated_deleted_count:1, semantic_status:'queued' }) }
     if (u.pathname === '/api/v1/fs/attrs') return send(200, { attrs:{ tags:projectTags.get(uri) || ['topic=travel'], memory:{ memory_type:'preferences', created_at:'2026-01-01T00:00:00Z', source_extraction_id:'source-123', content:'must not leak whole file' } } })
+    if (u.pathname === '/api/v1/content/set_tags') {
+      if (!records.has(body.uri)) return send(404, 'missing')
+      const current = projectTags.get(body.uri) || ['topic=travel']
+      projectTags.set(body.uri, body.mode === 'append' ? [...new Set([...current, ...body.tags])] : body.tags)
+      return send(200, { tags_updated: true })
+    }
     if (u.pathname === '/api/v1/search/grep') return send(200, { matches:[{ uri:searchKey, line:1, content:'travel evidence' }, { uri:other, line:1, content:'out of time range' }, { uri:'viking://user/test/memories/.overview.md', line:1, content:'wrong level' }] })
     if (u.pathname.startsWith('/api/v1/search/')) {
-      if (body.query === '' && body.tags?.[0]?.startsWith('project_id=')) {
+      if (body.query === '' && (body.tags?.[0]?.startsWith('project_id=') || body.tags?.[0] === 'core=true')) {
         const matches = [...projectTags].filter(([uri, tags]) => records.has(uri) && tags.includes(body.tags[0]))
-        const page = matches.slice(body.offset, body.offset + body.limit)
+        const offset = body.offset ?? 0
+        const page = matches.slice(offset, offset + body.limit)
         return send(200, { memories: page.map(([uri]) => ({ ...hit(uri), abstract: records.get(uri).split('\n')[0] })), resources: [], skills: [] })
       }
       if (body.filter?.op === 'must_not' && body.filter.field === 'uri' && body.filter.conds.includes(searchKey)) {
@@ -75,6 +82,8 @@ before(async () => {
   server = http.createServer(app); server.listen(0, '127.0.0.1'); await once(server, 'listening')
   base = 'http://127.0.0.1:' + server.address().port
 })
+
+
 after(async () => { app?.close(); await Promise.all([new Promise(r => server.close(r)),new Promise(r => upstream.close(r))]); fs.rmSync(dir,{recursive:true,force:true}) })
 async function request(method, route, body) {
   const res = await fetch(base + route, { method, headers:{'content-type':'application/json'}, ...(body === undefined ? {} : {body:JSON.stringify(body)}) })
@@ -413,4 +422,55 @@ test('project writes share a paginated catalogue with the agent and exclude only
     const search = await request('POST', '/v1/search', { query: 'deployment', limit: 1 })
     assert.equal(search.body.results[0].uri, agentUri)
   } finally { searchKey = previous }
+})
+
+test('core marking serializes its quota check and lists via empty native Find', async () => {
+  const samples = [
+    { directory: 'entities/people', firstLine: '# Entity display name' },
+    { directory: 'events/2026/11/23', firstLine: '# Summary' },
+    { directory: 'preferences/test', firstLine: '- A preference described in the body.' },
+  ]
+  const titles = new Map()
+  for (let i = 0; i < 21; i++) {
+    const { directory, firstLine } = samples[i % samples.length]
+    const title = '核心记忆.' + i
+    const uri = 'viking://user/test/memories/' + directory + '/' + title + '.md'
+    titles.set(uri, title)
+    records.set(uri, firstLine + '\nThis is the original body.')
+  }
+  const keys = [...titles.keys()]
+  projectTags.set(keys[0], ['project_id=prj_shared', 'topic=travel'])
+  const set = (key, core) => request('PATCH', '/v1/core-memories', { key, core })
+  const start = calls.length
+  const results = await Promise.all(keys.map(uri => set(uri, true)))
+  assert.equal(results.filter(result => result.status === 200).length, 20)
+  const full = results.findIndex(result => result.status === 409)
+  assert.notEqual(full, -1)
+  assert.equal(results[full].body.error.code, 'core_memory_limit')
+  assert.equal(calls.slice(start).some(call => call.path === '/api/v1/content/write'), false)
+  const existing = keys.find((_, index) => results[index].status === 200)
+  assert.equal((await set(existing, true)).status, 200)
+  const page = await request('GET', '/v1/core-memories')
+  assert.equal(page.status, 200)
+  assert.equal(page.body.maxItems, 20)
+  assert.equal(page.body.items.length, 20)
+  assert.equal(page.body.hasMore, false)
+  const find = calls.slice(start).find(call => call.path === '/api/v1/search/find').body
+  assert.deepEqual({ query: find.query, tags: find.tags, level: find.level, scope: find.target_uri[0] },
+    { query: '', tags: ['core=true'], level: 2, scope: 'viking://~/memories' })
+  assert.deepEqual(page.body.items.map(item => item.uri), page.body.items.map(item => item.uri).sort())
+  for (const item of page.body.items) assert.equal(item.title, titles.get(item.uri))
+
+  const update = await request('PATCH', '/v1/memories/' + encodeURIComponent(existing), {
+    oldText: 'original', newText: 'updated', tags: ['topic=changed'],
+  })
+  assert.equal(update.status, 200)
+  assert.ok(projectTags.get(existing).includes('core=true'))
+  assert.equal((await set(existing, false)).status, 200)
+  assert.ok(projectTags.get(existing).includes('topic=changed'))
+  if (existing === keys[0]) assert.ok(projectTags.get(existing).includes('project_id=prj_shared'))
+  assert.equal((await set(keys[full], true)).status, 200)
+  assert.equal((await request('PATCH', '/v1/memories/' + encodeURIComponent(existing), {
+    oldText: 'updated', newText: 'original', tags: ['core=true'],
+  })).status, 400)
 })
