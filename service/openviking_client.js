@@ -129,6 +129,12 @@ class OpenVikingClient {
     }), undefined, { raw: true })
   }
 
+  tree(uri, { depth, offset, limit }) {
+    return this.request('GET', '/api/v1/fs/tree?' + new URLSearchParams({ uri, offset, limit,
+      level_limit: depth, output: 'original', include_abstract: false, include_overview: false,
+    }), undefined, { raw: true })
+  }
+
   listFiles(uri, { offset = 0, limit = 200 } = {}) {
     return this.request('GET', '/api/v1/fs/ls?' + new URLSearchParams({ uri, offset, limit,
       output: 'original', recursive: false, show_all_hidden: true,

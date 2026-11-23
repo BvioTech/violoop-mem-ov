@@ -21,7 +21,7 @@ before(async () => {
     const body = text ? JSON.parse(text) : undefined
     const u = new URL(req.url, 'http://native'), uri = u.searchParams.get('uri')
     calls.push({ method: req.method, path: u.pathname, params: Object.fromEntries(u.searchParams), body })
-    const send = (status, result) => { res.writeHead(status, { 'content-type':'application/json' }); res.end(JSON.stringify(status < 400 ? { status:'ok', result } : { status:'error', error:{ message: result } })) }
+    const send = (status, result, fields) => { res.writeHead(status, { 'content-type':'application/json' }); res.end(JSON.stringify(status < 400 ? { status:'ok', result, ...fields } : { status:'error', error:{ message: result } })) }
     if (u.pathname === '/api/v1/content/write') {
       if (body.mode === 'create' && records.has(body.uri)) return send(409, 'already exists')
       records.set(body.uri, body.content)
@@ -43,6 +43,15 @@ before(async () => {
         entries.set(name, { name, uri: directory + '/' + name, isDir: suffix.includes('/') })
       }
       return send(200, [...entries.values()])
+    }
+    if (u.pathname === '/api/v1/fs/tree') {
+      if (uri.endsWith('/missing')) return send(404, 'missing')
+      const entries = ['2026', '2026/10', '2026/10/出差 #1.md'].map((rel_path, i) => ({
+        uri: uri + '/' + rel_path, rel_path, isDir: i < 2, size: 42,
+      })).filter(entry => entry.rel_path.split('/').length <= Number(u.searchParams.get('level_limit')))
+      const offset = Number(u.searchParams.get('offset'))
+      const limit = Number(u.searchParams.get('limit'))
+      return send(200, entries.slice(offset, offset + limit), { has_more: offset + limit < entries.length })
     }
     if (u.pathname === '/api/v1/fs' && req.method === 'DELETE') { records.delete(uri); return send(200, { uri, estimated_deleted_count:1, semantic_status:'queued' }) }
     if (u.pathname === '/api/v1/fs/attrs') return send(200, { attrs:{ tags:projectTags.get(uri) || ['topic=travel'], memory:{ memory_type:'preferences', created_at:'2026-01-01T00:00:00Z', source_extraction_id:'source-123', content:'must not leak whole file' } } })
@@ -72,6 +81,49 @@ async function request(method, route, body) {
   return { status:res.status, body:await res.json() }
 }
 const file = '/v1/memories/' + encodeURIComponent(key)
+test('tree defaults to user memories and makes one structure-only native request', async () => {
+  const start = calls.length
+  const response = await request('GET', '/v1/memory-tree')
+  assert.equal(response.status, 200)
+  assert.equal(response.body.depth, 3)
+  assert.equal(response.body.items.length, 3)
+  assert.equal(response.body.nextOffset, null)
+  assert.deepEqual(calls.slice(start), [{
+    method: 'GET', path: '/api/v1/fs/tree', body: undefined,
+    params: { uri: 'viking://~/memories', offset: '0', limit: '50', level_limit: '3',
+      output: 'original', include_abstract: 'false', include_overview: 'false' },
+  }])
+})
+
+test('tree preserves literal directory names and visible node pagination', async () => {
+  const prefix = 'viking://~/memories/events/出差 #100%'
+  const route = '/v1/memory-tree?' + new URLSearchParams({ prefix, depth: 3, limit: 2 })
+  const first = await request('GET', route)
+  assert.equal(first.status, 200)
+  assert.deepEqual(first.body.items.map(item => item.path), ['2026', '2026/10'])
+  assert.equal(first.body.hasMore, true)
+  assert.equal(first.body.nextOffset, 2)
+
+  const second = await request('GET', route + '&offset=' + first.body.nextOffset)
+  assert.equal(second.status, 200)
+  assert.equal(second.body.hasMore, false)
+  assert.deepEqual(second.body.items, [{
+    uri: prefix + '/2026/10/出差 #1.md', path: '2026/10/出差 #1.md', isDir: false,
+  }])
+  const shallow = await request('GET', '/v1/memory-tree?depth=1')
+  assert.deepEqual(shallow.body.items.map(item => item.path), ['2026'])
+})
+
+test('tree rejects invalid inputs before reaching native storage', async () => {
+  const start = calls.length
+  for (const query of ['prefix=projects.old', 'depth=0', 'depth=11', 'depth=1.5', 'limit=0', 'limit=201', 'offset=-1']) {
+    assert.equal((await request('GET', '/v1/memory-tree?' + query)).status, 400, query)
+  }
+  assert.equal(calls.length, start)
+  const missing = await request('GET', '/v1/memory-tree?prefix=viking://~/memories/missing')
+  assert.equal(missing.status, 404)
+})
+
 test('create calls native create, returns queued status and refuses overwrite', async () => {
   records.clear()
   let r = await request('POST','/v1/memories',{key,content:'# Preferences\nLikes trains.\nKeep this fact.',tags:['Topic=Travel']})

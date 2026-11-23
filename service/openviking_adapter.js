@@ -17,6 +17,15 @@ function integer(value, fallback, max = 50) {
   if (!Number.isInteger(value) || value < 0 || value > max) throw fail('invalid_query', `limit must be an integer in [0, ${max}]`)
   return value
 }
+function treeParameter(params, name, fallback, min, max) {
+  if (!params.has(name)) return fallback
+  const raw = params.get(name)
+  const value = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(value) || value < min || value > max) {
+    throw fail('invalid_query', `${name} must be an integer in [${min}, ${max}]`)
+  }
+  return value
+}
 function query(value, name = 'query') {
   if (typeof value !== 'string' || !value.trim()) throw fail('invalid_query', `${name} must be a non-empty string`)
   return value.trim().slice(0, 6000)
@@ -547,6 +556,17 @@ function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 80
         if (ingest) return json(res, 200, await journal.status(ingest[1]))
         const task = p.match(/^\/v2\/tasks\/([^/]+)$/)
         if (task) return json(res, 200, { backend: 'openviking', task: await client.task(decodeURIComponent(task[1])) })
+        if (p === '/v1/memory-tree') {
+          const prefix = uri(url.searchParams.get('prefix') ?? 'viking://~/memories')
+          const depth = treeParameter(url.searchParams, 'depth', 3, 1, 10)
+          const offset = treeParameter(url.searchParams, 'offset', 0, 0, 100000000)
+          const limit = treeParameter(url.searchParams, 'limit', 50, 1, 200)
+          const listing = await client.tree(prefix, { depth, offset, limit })
+          if (!Array.isArray(listing.result)) throw fail('upstream_error', 'invalid native directory tree response', 502)
+          const items = listing.result.map(({ uri, rel_path, isDir, access }) => ({ uri, path: rel_path, isDir, access }))
+          return json(res, 200, { backend: 'openviking', uri: prefix, depth, items,
+            hasMore: !!listing.has_more, nextOffset: listing.has_more ? offset + items.length : null })
+        }
         const memory = p.match(/^\/v1\/memories\/(.+)$/)
         if (memory) {
           const params = Object.fromEntries(['level', 'offset', 'limit', 'charOffset'].map(k => [k,
