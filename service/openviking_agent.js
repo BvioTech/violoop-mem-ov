@@ -5,6 +5,7 @@ const { eventTimeDecay } = require('./event_time_decay')
 const fail = (message, status = 400, code = 'invalid_query') => Object.assign(new Error(message), { status, code })
 const levelOf = value => value.endsWith('/.abstract.md') ? 0 : value.endsWith('/.overview.md') ? 1 : 2
 const canonical = value => value.replace(/\/(\.abstract|\.overview)\.md$/, '').replace(/\/$/, '')
+const CORE_TAG = 'core=true'
 
 function tags(value) {
   if (value === undefined) return undefined
@@ -111,11 +112,18 @@ async function enrich(client, hits, nativeResult, includeProvenance) {
       ...(hit.keywordMatches?.length ? { keywordMatches: hit.keywordMatches } : {}) } }
   }))
 }
-function createMutations(client, invalidate) {
+function createMutations(client, invalidate, requireCoreSlot) {
   const pending = new Map()
   return async function mutate(action, key, body = {}) {
     const target = memoryUri(key, client, { allowDisabledSingletonDelete: action === 'delete' })
     const normalizedTags = tags(body.tags)
+    if (normalizedTags?.some(tag => tag.startsWith('core='))) throw fail('Use memory.set_core_status to manage the core memory tag')
+    if (action === 'set_core' && typeof body.core !== 'boolean') throw fail('core must be a boolean')
+    const requestedProjectTag = normalizedTags?.find(tag => tag.startsWith('project_id='))
+    if (action === 'create' && requestedProjectTag &&
+        target.replace('viking://~/', `viking://user/${client.user}/`).startsWith(`viking://user/${client.user}/peers/`)) {
+      throw fail('Project memory must be in the shared user memories directory')
+    }
     if (action === 'create') text(body.content, 'content')
     if (action === 'update') { text(body.oldText, 'oldText'); text(body.newText, 'newText', true) }
     if (action === 'replace') {
@@ -128,7 +136,17 @@ function createMutations(client, invalidate) {
     const job = prior.catch(() => {}).then(async () => {
       try {
         let result
-        if (action === 'delete') {
+        if (action === 'set_core') {
+          const current = (await client.attrs(target)).attrs?.tags || []
+          if (current.includes(CORE_TAG) !== body.core) {
+            if (body.core) await requireCoreSlot()
+            const next = body.core ? [CORE_TAG] : current.filter(tag => tag !== CORE_TAG)
+            const mode = body.core ? 'append' : next.length ? 'replace' : 'clear'
+            result = await client.setTags(target, next, mode)
+            if (!result?.tags_updated) throw fail('Memory indexing is pending. Retry marking it after indexing completes.', 409, 'memory_not_indexed')
+          }
+          return { backend: 'openviking', uri: lockKey, core: body.core }
+        } else if (action === 'delete') {
           const stat = await client.stat(target)
           if (stat.isDir ?? stat.is_dir ?? stat.type === 'directory') throw fail('deleting directories is forbidden')
           result = await client.deleteMemory(target)
@@ -145,7 +163,23 @@ function createMutations(client, invalidate) {
             content = original.slice(0, start) + body.newText + original.slice(start + body.oldText.length)
             text(content, 'resulting content')
           }
-          result = await client.writeMemory(target, content, { mode: action === 'create' ? 'create' : 'replace', tags: normalizedTags })
+          let writeTags = normalizedTags
+          if (action !== 'create' && writeTags !== undefined) {
+            const attrs = await client.attrs(target)
+            const existingProjectTag = attrs?.attrs?.tags?.find(tag => tag.startsWith('project_id='))
+            if (requestedProjectTag && requestedProjectTag !== existingProjectTag) {
+              throw fail('Editing a memory cannot change its project tag')
+            }
+            if (existingProjectTag && !requestedProjectTag) {
+              writeTags = tags([...writeTags, existingProjectTag])
+            }
+            if (attrs?.attrs?.tags?.includes(CORE_TAG)) writeTags = [...writeTags, CORE_TAG]
+          }
+          result = await client.writeMemory(target, content, {
+            mode: action === 'create' ? 'create' : 'replace', tags: writeTags,
+            // Settle explicitly queued tag updates under the same file lock.
+            ...((action === 'create' ? requestedProjectTag : writeTags !== undefined) ? { wait: true } : {}),
+          })
         }
         return { backend: 'openviking', action, uri: target, key: target,
           ...(action === 'delete' ? { deleted: true } : {}), result,
@@ -160,4 +194,4 @@ function createMutations(client, invalidate) {
     try { return await job } finally { if (pending.get(lockKey) === job) pending.delete(lockKey) }
   }
 }
-module.exports = { searchOptions, createMutations, enrich, metadata, levelOf, canonical }
+module.exports = { searchOptions, createMutations, enrich, metadata, levelOf, canonical, CORE_TAG }

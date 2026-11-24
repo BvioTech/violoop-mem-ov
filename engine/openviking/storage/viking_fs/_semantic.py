@@ -205,6 +205,7 @@ class _SemanticMixin:
         image_url: Optional[str] = None,
         events_time_decay_protection: Optional[str] = None,
         search_type: SearchType = "semantic",
+        offset: Optional[int] = None,
     ):
         """Semantic search.
 
@@ -234,6 +235,8 @@ class _SemanticMixin:
                     "events_time_decay_protection requires a semantic query or image"
                 )
         else:
+            if offset is not None:
+                raise InvalidArgumentError("offset is only supported for filter-only find")
             _ensure_non_empty_search_query(query, image_url)
         if events_time_decay_protection is not None:
             parse_duration_ms(
@@ -264,6 +267,7 @@ class _SemanticMixin:
                 target_directories=retrieval_targets.target_directories,
                 limit=limit,
                 level=level,
+                offset=offset,
             )
 
         for target_dir in retrieval_targets.target_directories:
@@ -337,6 +341,7 @@ class _SemanticMixin:
         target_directories: Any,
         limit: int,
         level: Optional[List[int]] = None,
+        offset: Optional[int] = None,
     ) -> Any:
         """Resolve a query-less find purely from the metadata filter.
 
@@ -345,8 +350,9 @@ class _SemanticMixin:
         limits therefore stay identical between the two. Hand-building the
         filter here would be one refactor away from silently losing them.
 
-        Records are ordered by update time. There is no similarity ranking,
-        so ``score`` stays 0.
+        Records are ordered by most recent update by default. Offset-based
+        pagination orders by creation time so edits cannot move an item
+        between pages. There is no similarity ranking, so ``score`` stays 0.
         """
         from openviking.storage.vikingdb_manager import VikingDBManagerProxy
         from openviking_cli.retrieve import ContextType, FindResult
@@ -365,6 +371,7 @@ class _SemanticMixin:
             extra_filter=filter,
             level=level,
             limit=limit,
+            **({"offset": offset, "order_by": "created_at"} if offset is not None else {}),
         )
 
         memories, resources, skills = [], [], []

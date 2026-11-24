@@ -4,10 +4,11 @@ const { createHash } = require('crypto')
 const { createEntries } = require('./openviking_entries')
 const { validateVikingUri } = require('./openviking_uri')
 const { keywordsPattern, mergeSearch } = require('./hybrid_search')
-const { PREVIEW_CHARS, boundPreviews } = require('./retrieval_budget')
-const { searchOptions, createMutations, enrich, metadata, levelOf, canonical } = require('./openviking_agent')
+const { previewBudget, boundPreviews } = require('./retrieval_budget')
+const { searchOptions, createMutations, enrich, metadata, levelOf, canonical, CORE_TAG } = require('./openviking_agent')
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024
+const MAX_CORE_MEMORIES = 20
 // Keep in sync with Compose's query limit.
 const MAX_QUERY_CHARS = 2000
 const TRIVIAL_RE = /^(continue|go on|next|ok(ay)?|yep|yes|no|sure|done|thx|thanks?|嗯+|哦+|好+的?|继续|行|对|是的?|可以|没事了?|不用了?|算了)[\s.!~。！？]*$/i
@@ -17,6 +18,15 @@ const hash = value => createHash('sha256').update(value).digest('hex')
 function integer(value, fallback, max = 50) {
   if (value === undefined) return fallback
   if (!Number.isInteger(value) || value < 0 || value > max) throw fail('invalid_query', `limit must be an integer in [0, ${max}]`)
+  return value
+}
+function treeParameter(params, name, fallback, min, max) {
+  if (!params.has(name)) return fallback
+  const raw = params.get(name)
+  const value = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(value) || value < min || value > max) {
+    throw fail('invalid_query', `${name} must be an integer in [${min}, ${max}]`)
+  }
   return value
 }
 function query(value, name = 'query') {
@@ -61,13 +71,15 @@ async function readJson(req) {
   return body
 }
 
-function flatten(result, limit, maxChars) {
+function flatten(result, limit, maxChars = Infinity, minScore) {
   if (!result || !['memories', 'resources', 'skills'].every(k => Array.isArray(result[k]))) {
     throw fail('upstream_error', 'invalid OpenViking retrieval result', 502)
   }
   const seen = new Set()
   return [...result.memories, ...result.resources, ...result.skills]
     .filter(h => h && typeof h.uri === 'string' && h.uri.startsWith('viking://') && Number.isFinite(h.score))
+    .filter(h => minScore === undefined || h.score >= minScore)
+    .filter(h => maxChars === 0 || (typeof h.abstract === 'string' && h.abstract.trim()))
     .sort((a, b) => b.score - a.score)
     .filter(h => { const key = uri(h.uri); if (seen.has(key)) return false; seen.add(key); return true })
     .slice(0, limit)
@@ -80,7 +92,7 @@ function flatten(result, limit, maxChars) {
         abstract: String(full).slice(0, maxChars), content: String(full).slice(0, maxChars), score: h.score,
         contextType: h.context_type, level: h.level,
         ...(Array.isArray(h.tags) ? { tags: h.tags } : {}),
-        truncated: String(full).length > maxChars,
+        truncated: !!h.truncated || String(full).length > maxChars,
       }
     })
 }
@@ -92,7 +104,8 @@ function entity(hit, recall = false) {
   return {
     id: hit.uri, name: hit.title, type: 'memory', aliases: [], domains: [],
     observations, relations: [], matchedBy: 'semantic', score: hit.score,
-    uri: hit.uri, key: hit.key, truncated: hit.truncated,
+    // Preserve the legacy envelope shape and report its own compatibility cap.
+    uri: hit.uri, key: hit.key, truncated: !!hit.truncated || observations.join('').length < hit.content.length,
   }
 }
 
@@ -319,7 +332,7 @@ class IngestJournal {
   }
 }
 
-function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 8000,
+function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 8000,
   abstractMaxChars = 600, readMaxChars = 6000, legacySourceFile, coexistence = false } = {}) {
   if (!dataDir) throw new Error('adapter dataDir is required')
   for (const value of [recallMaxChars, searchMaxChars, abstractMaxChars, readMaxChars]) {
@@ -354,12 +367,41 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
       throw err
     }
   })
-  const migration = new (require('./legacy_migration').LegacyMigration)({ dataDir,
-    ...(legacySourceFile ? { sourceFile: legacySourceFile } : {}), client, journal, coexistence, autoResume: false })
   const entries = createEntries(client)
+  const migration = new (require('./legacy_migration').LegacyMigration)({ dataDir,
+    ...(legacySourceFile ? { sourceFile: legacySourceFile } : {}), client, journal, coexistence, autoResume: false,
+    invalidateEntries: () => entries.invalidate() })
   const consolidation = new (require('./openviking_consolidation').MemoryConsolidation)(client, graph,
     { dataDir, invalidate: () => entries.invalidate() })
-  const nativeMutate = createMutations(client, () => entries.invalidate())
+  const canonicalUri = value => uri(value).replace('viking://~/', 'viking://user/' + client.user + '/')
+  async function findCoreMemories() {
+    const result = await nativeRetrieve('', { mode: 'find', targetUri: [
+      'viking://~/memories', 'viking://user/' + client.user + '/peers/' + client.actorPeer + '/memories',
+    ], tags: [CORE_TAG], level: 2, contextType: 'memory', limit: MAX_CORE_MEMORIES + 1 })
+    return [...new Set(flatten(result, MAX_CORE_MEMORIES + 1, 0).map(item => canonicalUri(item.uri)))]
+  }
+  async function listCoreMemories() {
+    const candidates = await findCoreMemories()
+    const items = (await Promise.all(candidates.map(async uri => {
+      try {
+        const stat = await client.stat(uri)
+        const value = stat.modTime ?? stat.mtime ?? stat.updated_at
+        return { uri, title: path.posix.basename(uri, '.md'),
+          updatedAt: typeof value === 'number' ? value * 1000 : Date.parse(value) || 0 }
+      } catch (err) {
+        if (err.upstreamStatus !== 404) throw err
+        return null
+      }
+    }))).filter(Boolean)
+      .sort((a, b) => b.updatedAt - a.updatedAt || a.uri.localeCompare(b.uri))
+    return { items: items.slice(0, MAX_CORE_MEMORIES), hasMore: items.length > MAX_CORE_MEMORIES, maxItems: MAX_CORE_MEMORIES }
+  }
+  let coreWrite = Promise.resolve()
+  const nativeMutate = createMutations(client, () => entries.invalidate(), async () => {
+    if ((await findCoreMemories()).length >= MAX_CORE_MEMORIES) {
+      throw fail('core_memory_limit', `Core memory limit reached (${MAX_CORE_MEMORIES}). Unmark a memory to make room.`, 409)
+    }
+  })
   const manual = require('./openviking_manual')
   const mutate = async (...args) => {
     if (migration.blocksNativeWrites()) {
@@ -368,9 +410,9 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     const result = await nativeMutate(...args)
     // These API writes have already persisted the file when they return.
     // Indexing stays separate from the native vector-processing task.
-    graph.queueCompletion(hash('write:' + process.hrtime.bigint()), [
-      result.uri.replace('viking://~/', `viking://user/${client.user}/`),
-    ])
+    if (args[0] !== 'set_core') {
+      graph.queueCompletion(hash('write:' + process.hrtime.bigint()), [canonicalUri(result.uri)])
+    }
     return result
   }
   async function nativeRetrieve(q, options) {
@@ -398,13 +440,26 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     res.end(body)
   }
   async function retrieve(body, mode, requestedLimit) {
-    if (!['recall', 'search'].includes(mode)) throw fail('invalid_query', 'mode must be recall or search')
+    if (!['recall', 'find', 'search'].includes(mode)) throw fail('invalid_query', 'mode must be recall, find or search')
+    const automatic = mode === 'recall'
+    const budgetChars = previewBudget(body.budgetChars, automatic ? recallMaxChars : searchMaxChars)
     const pattern = keywordsPattern(body.keywords)
-    const options = searchOptions(body, client, { automatic: mode === 'recall' })
-    if (mode === 'recall' && pattern) throw fail('invalid_query', 'keywords are only supported by search')
+    const options = searchOptions(body, client, { automatic })
+    if (automatic && body.excludeUris !== undefined) {
+      if (!Array.isArray(body.excludeUris) || body.excludeUris.length > 50) {
+        throw fail('invalid_query', 'excludeUris must be an array of at most 50 file URIs')
+      }
+      const excluded = [...new Set(body.excludeUris.map(value =>
+        uri(value).replace('viking://~/', `viking://user/${client.user}/`)))]
+      if (excluded.length) {
+        const filter = { op: 'must_not', field: 'uri', conds: excluded, para: '-d=0' }
+        options.filter = options.filter ? { op: 'and', conds: [options.filter, filter] } : filter
+      }
+    }
+    if (automatic && pattern) throw fail('invalid_query', 'keywords are only supported by search')
     const q = query(body.query)
     const requested = integer(requestedLimit ?? body.limit, 10)
-    const limit = mode === 'recall' || pattern ? Math.min(requested, 10) : requested
+    const limit = automatic || pattern ? Math.min(requested, 10) : requested
     // No default score floor. Explicit caller thresholds remain wire-compatible.
     const minScore = body.minScore ?? body.minSim
     if (minScore !== undefined && !Number.isFinite(minScore)) throw fail('invalid_query', 'minScore must be finite')
@@ -415,7 +470,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     if (targetUri !== undefined) validateVikingUri(targetUri)
     if (body.sessionId !== undefined && typeof body.sessionId !== 'string') throw fail('invalid_query', 'sessionId must be a string')
     if (!limit) return []
-    if (mode === 'recall' && (q.length < 8 || TRIVIAL_RE.test(q))) return []
+    if (automatic && (q.length < 8 || TRIVIAL_RE.test(q))) return []
     const level = body.level === undefined ? undefined : integer(body.level, 0, 2)
     if (pattern) {
       // Both branches use the same explicit scope. With keywords, the default
@@ -425,7 +480,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
         nativeRetrieve(q, { ...options, mode, limit, minScore, targetUri: scope, sessionId: body.sessionId, level }),
         runGrep({ pattern, prefix: scope, limit: Math.min(50, Math.max(10, limit * 4)), caseInsensitive: true }),
       ])
-      const semantic = flatten(result, limit, PREVIEW_CHARS).filter(h => minScore === undefined || h.score >= minScore)
+      const semantic = flatten(result, limit, undefined, minScore)
       let matches = grep.result.matches
       // grep has no time/type predicates. Check candidates against native
       // filter-only find, separately per level (find deduplicates by URI).
@@ -444,12 +499,11 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
         }))
         matches = matches.filter(m => eligible.has(levelOf(m.uri) + ':' + canonical(m.uri)))
       }
-      return enrich(client, mergeSearch(semantic, matches, { limit, maxChars: searchMaxChars, level }), result, options.includeProvenance)
+      return enrich(client, mergeSearch(semantic, matches, { limit, maxChars: budgetChars, level }), result, options.includeProvenance)
     }
     const result = await nativeRetrieve(q, { ...options, mode, limit, minScore, targetUri, sessionId: body.sessionId, level })
-    const hits = flatten(result, limit, PREVIEW_CHARS)
-      .filter(h => minScore === undefined || h.score >= minScore)
-    return enrich(client, boundPreviews(hits, mode === 'recall' ? recallMaxChars : searchMaxChars), result, options.includeProvenance)
+    const hits = flatten(result, limit, undefined, minScore)
+    return enrich(client, boundPreviews(hits, budgetChars), result, options.includeProvenance)
   }
   async function readMemory(key, params) {
     const requestedUri = uri(key)
@@ -499,12 +553,12 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     return { result, target, limit }
   }
   async function grepMemory(body) {
+    const budgetChars = previewBudget(body.budgetChars, 6000)
     const { result, target, limit } = await runGrep(body)
     const hits = result.matches.slice(0, limit)
-    const perHitChars = hits.length ? Math.min(600, Math.floor(6000 / hits.length)) : 600
-    const matches = hits.map(m => ({ uri: m.uri, line: m.line,
+    const matches = boundPreviews(hits.map(m => ({ ...m,
       level: m.uri.endsWith('/.abstract.md') ? 0 : m.uri.endsWith('/.overview.md') ? 1 : 2,
-      content: m.content.slice(0, perHitChars), truncated: m.content.length > perHitChars }))
+    })), budgetChars).map(({ abstract, ...match }) => match)
     return { backend: 'openviking', uri: target, pattern: body.pattern, matches, count: matches.length,
       limited: limit > 0 && result.matches.length >= limit, truncated: result.matches.length > limit || matches.some(m => m.truncated),
       filesScanned: Number.isFinite(result.files_scanned) ? result.files_scanned : null }
@@ -519,6 +573,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
         return json(res, 202, graph.startSync())
       }
       if (req.method === 'GET') {
+        if (p === '/v1/core-memories') return json(res, 200, await listCoreMemories())
         if (p === '/v2/graph/status' && url.searchParams.get('view') === 'memory') {
           return json(res, 200, await graph.status())
         }
@@ -533,7 +588,9 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
         if (p === '/v2/graph/details' && url.searchParams.get('view') === 'memory') {
           return json(res, 200, await graph.detail(query(url.searchParams.get('id'), 'id')))
         }
-        if (p === '/healthz') return json(res, 200, { status: 'ok', backend: 'openviking' })
+        if (p === '/healthz') {
+          return json(res, 200, { status: 'ok', backend: 'openviking', capabilities: { projectMemoryTags: true } })
+        }
         if (p === '/v2/migration/status') {
           try { return json(res, 200, migration.status()) }
           catch (e) { throw fail('migration_unavailable', e.message, 503) }
@@ -553,6 +610,17 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
         if (ingest) return json(res, 200, await journal.status(ingest[1]))
         const task = p.match(/^\/v2\/tasks\/([^/]+)$/)
         if (task) return json(res, 200, { backend: 'openviking', task: await client.task(decodeURIComponent(task[1])) })
+        if (p === '/v1/memory-tree') {
+          const prefix = uri(url.searchParams.get('prefix') ?? 'viking://~/memories')
+          const depth = treeParameter(url.searchParams, 'depth', 3, 1, 10)
+          const offset = treeParameter(url.searchParams, 'offset', 0, 0, 100000000)
+          const limit = treeParameter(url.searchParams, 'limit', 50, 1, 200)
+          const listing = await client.tree(prefix, { depth, offset, limit })
+          if (!Array.isArray(listing.result)) throw fail('upstream_error', 'invalid native directory tree response', 502)
+          const items = listing.result.map(({ uri, rel_path, isDir, access }) => ({ uri, path: rel_path, isDir, access }))
+          return json(res, 200, { backend: 'openviking', uri: prefix, depth, items,
+            hasMore: !!listing.has_more, nextOffset: listing.has_more ? offset + items.length : null })
+        }
         const memory = p.match(/^\/v1\/memories\/(.+)$/)
         if (memory) {
           const params = Object.fromEntries(['level', 'offset', 'limit', 'charOffset'].map(k => [k,
@@ -586,7 +654,32 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
       }
       if (req.method === 'POST' && p === '/v1/memory-entries') {
         const body = await readJson(req), plan = manual.planMemory(body, client)
-        return json(res, 201, await mutate('create', plan.uri, { content: manual.serializeMemory(plan, body.content) }))
+        const tags = body.projectId === undefined ? undefined : [manual.projectTag(body.projectId)]
+        return json(res, 201, await mutate('create', plan.uri, { content: manual.serializeMemory(plan, body.content), tags }))
+      }
+      if (req.method === 'PATCH' && p === '/v1/core-memories') {
+        const { key, core } = await readJson(req)
+        // The quota check and tag write must serialize across different files.
+        const job = coreWrite.catch(() => {}).then(() => mutate('set_core', key, { core }))
+        coreWrite = job
+        return json(res, 200, await job)
+      }
+      if (req.method === 'POST' && p === '/v1/project-memories/list') {
+        const body = await readJson(req)
+        const tag = manual.projectTag(body.projectId)
+        const offset = integer(body.offset, 0, 100000000)
+        const limit = integer(body.limit, 20)
+        if (!limit) throw fail('invalid_query', 'limit must be positive')
+        const result = await nativeRetrieve('', { mode: 'find', offset, limit: limit + 1,
+          targetUri: 'viking://~/memories', contextType: 'memory', level: 2, tags: [tag] })
+        const items = flatten(result, limit, 0)
+        const abstracts = body.includePreview === true
+          ? new Map(result.memories.map(hit => [hit.uri, hit.abstract || '']))
+          : null
+        return json(res, 200, { items: items.map(item => ({
+          uri: canonicalUri(item.uri), key: canonicalUri(item.uri), title: item.title,
+          ...(abstracts ? { abstract: abstracts.get(item.uri) } : {}),
+        })), nextOffset: result.memories.length > limit ? offset + limit : null })
       }
       const panelMutation = p.match(/^\/v1\/memory-entries\/(.+)$/)
       if (req.method === 'PATCH' && panelMutation) {
@@ -628,8 +721,8 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
           const hits = await retrieve({ ...body, query: text }, 'recall', maxEntities)
           return json(res, 200, { backend: 'openviking', results: hits, entities: hits.map(h => entity(h, true)), relations: [] })
         }
-        // Agent/proactive search uses native search; automatic recall uses
-        // /v2/recall and native find. Return summaries for progressive reading.
+        // Agent search defaults to native search; proactive callers select find
+        // without the automatic-recall gate. Return summaries for progressive reading.
         const mode = body.mode ?? 'search'
         const hits = await retrieve(body, mode)
         return json(res, 200, { backend: 'openviking', results: hits })

@@ -131,6 +131,7 @@ class FindRequest(BaseModel):
     target_uri: Union[str, List[str]] = ""
     context_type: Optional[Union[str, List[str]]] = None
     limit: int = DEFAULT_LIMIT
+    offset: Optional[int] = Field(default=None, ge=0)
     node_limit: Optional[int] = None
     score_threshold: Optional[float] = None
     filter: Optional[Dict[str, Any]] = None
@@ -146,6 +147,8 @@ class FindRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_time_decay(self) -> "FindRequest":
+        if self.offset is not None and (self.query.strip() or self.image_url):
+            raise ValueError("offset is only supported for filter-only find")
         validate_event_time_decay_request(self.events_time_decay_protection)
         if self.events_time_decay_protection is not None:
             if not self.query.strip() and not self.image_url:
@@ -398,6 +401,7 @@ async def find(
             level=_resolve_levels(request.level) or None,
             image_url=resolved_image_url,
             events_time_decay_protection=request.events_time_decay_protection,
+            **({"offset": request.offset} if request.offset is not None else {}),
         ),
     )
     result = execution.result

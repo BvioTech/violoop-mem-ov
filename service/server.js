@@ -43,7 +43,9 @@ async function start(config, { runtimeOptions } = {}) {
   const client = new OpenVikingClient({ ...config.openviking, ...(runtime ? { apiKey: runtime.engineKey } : {}) })
   const nativeReady = client.ready.bind(client)
   let background
+  let language
   if (runtime) client.ready = async () => !!runtime.status().pid
+    && !!language?.status().ready
     && (background?.paused || (runtime.embedder.status().state === 'ready' && runtime.embedder.status().dim === 1024)) && await nativeReady()
   if (runtime) {
     const nativeMigrationReady = client.migrationReady.bind(client)
@@ -51,8 +53,28 @@ async function start(config, { runtimeOptions } = {}) {
   }
   const app = createApp(client, { dataDir: config.dataDir, ...config.openviking })
   if (runtime) {
+    let standbyPaused = false; let languageHeld = true
+    const pauseMigration = app.setPaused.bind(app)
+    app.setPaused = paused => { standbyPaused = paused; pauseMigration(standbyPaused || languageHeld) }
     try { background = new (require('./background').BackgroundControl)({ dataDir: config.dataDir, app, client, runtime }) }
     catch (err) { await app.close(); await runtime.stop(); throw err }
+    language = new (require('./language_sync').LanguageSync)({
+      dataDir: config.dataDir, deviceUrl: config.openviking.deviceModelUrl,
+      hold(held) { languageHeld = held; pauseMigration(standbyPaused || languageHeld) },
+      async apply(value, cancelled) {
+        // Stop new submissions before draining accepted work. This also waits
+        // for consolidation, which runs outside the ordinary native queues.
+        while (language.active && !cancelled()) await new Promise(resolve => setTimeout(resolve, 25))
+        if (cancelled()) return
+        if (!await nativeReady()) throw new Error('OpenViking is not ready for language synchronization')
+        await app.drainSubmissions({ isCancelled: cancelled })
+        if (cancelled()) return
+        await client.waitProcessed()
+        if (cancelled()) return
+        await client.setOutputLanguage(value)
+        runtime.setOutputLanguage(value)
+      },
+    })
   }
   const embeddings = runtime?.createEmbeddingApi(task => background.run(task))
   const handler = async (req, res) => {
@@ -86,14 +108,14 @@ async function start(config, { runtimeOptions } = {}) {
     }
     if (runtime && req.method === 'GET' && req.url === '/runtimez') {
       res.writeHead(200, { 'content-type': 'application/json' })
-      return res.end(JSON.stringify(runtime.status()))
+      return res.end(JSON.stringify({ ...runtime.status(), language: language.status() }))
     }
     // Read-only browsing, graph display and task receipts remain available.
     // Search uses a model, and writes may schedule native work: gate these
     // before acceptance so standby never cancels a partially written request.
     if (background && ['POST', 'PATCH', 'DELETE'].includes(req.method)
         && !['/v2/ingests/lookup', '/v1/grep'].includes(route)) {
-      try { return await background.run(() => app(req, res)) }
+      try { return await language.run(() => background.run(() => app(req, res))) }
       catch (err) {
         res.writeHead(err.status || 503, { 'content-type': 'application/json' })
         return res.end(JSON.stringify({ error: { code: err.code || 'background_unavailable', message: err.message } }))
@@ -122,6 +144,7 @@ async function start(config, { runtimeOptions } = {}) {
       await listen(httpServer, config.httpPort, config.httpHost)
     }
   } catch (err) {
+    await language?.stop()
     await background?.stop()
     await app.close?.()
     socketServer.close()
@@ -130,13 +153,14 @@ async function start(config, { runtimeOptions } = {}) {
     throw err
   }
   app.resume?.() // Resume receipt monitoring only after this process owns its sockets.
+  language?.start()
   if (background?.paused) background.reconcile()
   console.log(`[violoop-mem-ov] OpenViking adapter listening: ${config.socket}`)
   console.log(`[violoop-mem-ov] backend=openviking; adapter state=${config.dataDir}`)
   let shutdownPromise
   const shutdown = () => {
     if (shutdownPromise) return shutdownPromise
-    const closingApp = (async () => { await background?.stop(); await app.close?.() })()
+    const closingApp = (async () => { await language?.stop(); await background?.stop(); await app.close?.() })()
     const closingServers = [socketServer, httpServer].filter(Boolean).map(server => new Promise((resolve, reject) => {
       server.close(err => err && err.code !== 'ERR_SERVER_NOT_RUNNING' ? reject(err) : resolve())
     }))
@@ -164,7 +188,7 @@ async function start(config, { runtimeOptions } = {}) {
   }
   process.on('SIGTERM', shutdown)
   process.on('SIGINT', shutdown)
-  return { client, socketServer, httpServer, runtime, background, shutdown }
+  return { client, socketServer, httpServer, runtime, background, language, shutdown }
 }
 
 if (require.main === module) start(loadConfig()).catch(err => {

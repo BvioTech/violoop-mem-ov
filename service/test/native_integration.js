@@ -6,6 +6,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const http = require('http')
+const Database = require('better-sqlite3')
 const { createHash } = require('crypto')
 const serviceRoot = process.env.VIOLOOP_TEST_SERVICE_ROOT || path.join(__dirname, '..')
 const { start } = require(path.join(serviceRoot, 'server'))
@@ -52,6 +53,8 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
   let holdExtraction = null; let releaseExtraction = () => {}
   const model = http.createServer(async (req, res) => {
     if (req.url.endsWith('/ready')) { res.end('{"ready":true}'); return }
+    if (req.url === '/settings/language') { res.end('{"ui":"system","resolved":""}'); return }
+    if (req.url === '/events') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.flushHeaders(); return }
     let raw = ''; for await (const c of req) raw += c
     const body = JSON.parse(raw)
     if (req.url === '/internal/memory/embeddings') {
@@ -85,6 +88,17 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
     fs.rmSync(dir, { recursive: true, force: true })
   })
   const file = linkedLegacyDatabase(path.join(dir, 'graph.db'))
+  const projectId = 'prj_verify_01', projectKey = `projects.${projectId}.release-flow`
+  const projectContent = '\n  # Release flow\nRun the original checks.  \n'
+  const editedProjectContent = '\n  # Release flow\nRun the corrected checks.  \n\n'
+  const projectCreated = '2023-05-07T01:02:03.000Z', projectUpdated = '2026-11-20T03:20:00.000Z'
+  const db = new Database(file)
+  try {
+    const insert = db.prepare('INSERT INTO memories (id,key,content,created_at,updated_at) VALUES (?,?,?,?,?)')
+    insert.run('project', projectKey, projectContent, projectCreated, projectCreated)
+    insert.run('collision', projectKey + '.', 'Separate release note', projectCreated, projectCreated)
+    insert.run('deleted', `projects.${projectId}.obsolete`, 'Obsolete release note', projectCreated, projectCreated)
+  } finally { db.close() }
   let before = digest(file)
   const socket = path.join(dir, 'mem.sock')
   const config = loadConfig(['--socket', socket, '--data-dir', dir], {
@@ -121,9 +135,17 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
   })
   assert.ok(graph.entities.every(e => !/identity|soul/.test(e.id)))
   const oldUris = graph.entities.map(e => e.id)
-  const db = new (require('better-sqlite3'))(file)
-  try { db.prepare("UPDATE memories SET content='corrected during legacy operation' WHERE key='a'").run() }
-  finally { db.close() }
+  const projectList = (projectId, options = {}) => req('POST', '/v1/project-memories/list', { projectId, ...options })
+  const projectUri = `viking://user/default/memories/entities/${projectId}/release-flow.md`
+  const projectPath = '/v1/memory-entries/' + encodeURIComponent(projectUri)
+  assert.equal((await req('GET', projectPath)).content, projectContent)
+  assert.equal((await projectList(projectId)).items.length, 3)
+  const legacy = new Database(file)
+  try {
+    legacy.prepare("UPDATE memories SET content='corrected during legacy operation' WHERE key='a'").run()
+    legacy.prepare('UPDATE memories SET content=?, updated_at=? WHERE id=?').run(editedProjectContent, projectUpdated, 'project')
+    legacy.prepare("DELETE FROM memories WHERE id='deleted'").run()
+  } finally { legacy.close() }
   before = digest(file)
   assert.equal((await req('GET', '/v2/migration/status')).readyForCutover, false)
   await until(async () => {
@@ -138,6 +160,33 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
   const status = await req('GET', '/v2/migration/status')
   assert.equal((await req('POST', '/v2/migration/activate', { sourceRevision: status.sourceRevision })).activated, true)
   assert.equal(digest(file), before, 'catch-up and activation preserve the legacy source')
+  const listed = (await projectList(projectId)).items
+  assert.equal(listed.length, 2)
+  assert.equal(new Set(listed.map(item => item.uri)).size, 2)
+  assert.ok(listed.every(item => item.uri.includes(`/entities/${projectId}/`) && !Object.hasOwn(item, 'abstract')))
+  const previewed = (await projectList(projectId, { includePreview: true })).items
+  assert.deepEqual(previewed.map(item => item.uri).sort(), listed.map(item => item.uri).sort())
+  assert.ok(previewed.every(item => item.abstract.trim().length > 0))
+  assert.deepEqual((await projectList('prj_other', { includePreview: true })).items, [])
+  assert.deepEqual((await projectList('prj_other')).items, [])
+  const entries = (await req('GET', '/v1/memory-entries')).items
+  assert.ok(entries.some(item => item.uri === projectUri))
+  assert.ok(!entries.some(item => item.uri.endsWith('/obsolete.md')))
+  const project = await req('GET', projectPath)
+  assert.equal(project.content, editedProjectContent)
+  const collision = listed.find(item => item.uri !== projectUri)
+  assert.equal((await req('GET', '/v1/memory-entries/' + encodeURIComponent(collision.uri))).content, 'Separate release note')
+  const readMetadata = uri => req('GET', '/v1/memories/' + encodeURIComponent(uri) + '?level=2&includeProvenance=true')
+  const migrated = await readMetadata(projectUri)
+  assert.equal(new Date(migrated.memory.created_at).toISOString(), projectCreated)
+  assert.equal(new Date(migrated.memory.updated_at).toISOString(), projectUpdated)
+  assert.ok(migrated.tags.includes('project_id=' + projectId))
+  assert.ok((await readMetadata(collision.uri)).tags.includes('project_id=' + projectId))
+  const patchedProjectContent = '# Release flow\nUpdated from the project page.'
+  await req('PATCH', projectPath, { content: patchedProjectContent, expectedContent: project.content, tags: ['topic=release'] })
+  assert.equal((await req('GET', projectPath)).content, patchedProjectContent)
+  assert.ok((await readMetadata(projectUri)).tags.includes('project_id=' + projectId))
+  assert.ok((await projectList(projectId)).items.some(item => item.uri === projectUri))
   const added = await req('POST', '/v1/memory-entries', { memoryType: 'entities', category: 'projects', name: 'manual', content: '# Manual\nA searchable local integration record.' })
   const uri = added.uri
   assert.ok(uri.endsWith('/entities/projects/manual.md'))
@@ -189,6 +238,7 @@ test('managed native engine: auto migration, actual files/links, CRUD, retrieval
   await req('POST', '/runtime/background', { paused: false })
   await until(async () => !(await req('GET', '/runtime/background')).busy)
   assert.equal(modelPaused, false)
+  await until(async () => (await req('GET', '/readyz')).ready)
   await req('POST', '/v1/search', { query: 'local integration project', mode: 'recall', limit: 5 })
   assert.equal(extractionCalls, callsBefore + 1, 'standby and wake never replay completed migration or ingest')
   assert.equal(digest(file), before)

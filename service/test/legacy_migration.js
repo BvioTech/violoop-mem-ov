@@ -4,10 +4,11 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const Database = require('better-sqlite3')
-const { linkedLegacyDatabase } = require('./fixtures/legacy')
+const { createLegacyDatabase, linkedLegacyDatabase } = require('./fixtures/legacy')
 const { readLegacySnapshot, observationHash, hash } = require('../legacy_source')
 const { planMigration, countMessages } = require('../legacy_migration_plan')
 const { LegacyMigration } = require('../legacy_migration')
+const { legacyProjectWrite } = require('../openviking_manual')
 const { IngestJournal } = require('../openviking_adapter')
 const { writeJson } = require('../durable_json')
 const root = t => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'legacy-migrate-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true })); return dir }
@@ -46,6 +47,43 @@ test('linked groups stay intact, residual observations survive, shared edge not 
   assert.equal(p.resources.length, 6)
   assert.ok(p.batches.flatMap(b => b.messages).every(m => m.createdAt === time && m.id.startsWith('violoop-legacy-migration:')))
   assert.ok(p.batches.every(b => b.messages.length === 1))
+})
+
+test('project entries are planned directly and their linked graph facts still reach extraction', () => {
+  const s = snapshot()
+  const key = s.memories[0].key = 'projects.prj_verify_01.release-flow'
+  s.memories[0].content = 'Project instructions only'
+  s.associations = { [key]: s.associations.a }
+  const p = planMigration(s)
+  const [project] = p.projectMemories
+  assert.equal(project.content, 'Project instructions only')
+  assert.equal(project.projectId, 'prj_verify_01')
+  assert.deepEqual(project.claims, ['memory:a'])
+  assert.ok(p.resources.some(r => r.id === 'memory:a'))
+  assert.ok(!p.batches.flatMap(b => b.claims).includes('memory:a'))
+  const batches = JSON.stringify(p.batches)
+  assert.doesNotMatch(batches, /Project instructions only/)
+  assert.match(batches, /from a/)
+  assert.match(batches, /relation:r/)
+  assert.match(batches, /memory:b/)
+})
+
+test('project filename collisions resolve deterministically within native limits', () => {
+  const first = 'X'.repeat(50)
+  const prefix = 'projects.prj_verify_01.'
+  const memories = [memory(prefix + first, '  original\n'), memory(prefix + first.toLowerCase(), '   '),
+    memory(prefix + first.slice(0, 35) + '-' + hash(prefix + first.toLowerCase()).slice(0, 10), '<!--\x85MEMORY_FIELDS\n{}\n-->'),
+    memory('projects.bad id.release-flow'), memory(prefix + '   '), memory('projects.other.slash/name')]
+  const spec = { memories, entities: [], relations: [], associations: {} }
+  const { batches, projectMemories } = planMigration(spec)
+  assert.deepEqual(planMigration({ ...spec, memories: [...memories].reverse() }).projectMemories, projectMemories)
+  assert.deepEqual(batches.flatMap(b => b.claims), ['memory:projects.bad id.release-flow', 'memory:' + prefix + '   '])
+  const uris = projectMemories.map(m => legacyProjectWrite(m, { user: 'test' }).uri)
+  assert.equal(new Set(uris).size, 4)
+  assert.ok(uris.every(uri => path.basename(uri).length <= 49))
+  assert.equal(projectMemories.find(m => m.key === prefix + first).content, '  original\n')
+  assert.equal(projectMemories.find(m => m.key === prefix + first.toLowerCase()).content, '(Empty legacy project memory)')
+  assert.ok(projectMemories.some(m => m.content.startsWith('&lt;!--\x85MEMORY_FIELDS')))
 })
 
 test('high-degree nodes batch by whole edges; no whole adjacency expansion and no truncation', () => {
@@ -110,6 +148,49 @@ test('new installations without an old database report zero without creating one
   assert.equal(fs.existsSync(path.join(dir, 'graph.db')), false)
   assert.equal(fs.existsSync(svc.file), false)
   svc.stop()
+})
+test('project-only migration persists pending writes and retries before allowing activation', async t => {
+  const dataDir = root(t), content = '# Release flow\nRun the verified checks.'
+  const sourceFile = createLegacyDatabase(path.join(dataDir, 'graph.db'), { memories: [{
+    id: 'project', key: 'projects.prj_verify_01.release-flow', content, updated_at: '2026-11-20T03:20:00Z',
+  }] })
+  const writes = []
+  let settle
+  const client = { scope: 'scope', user: 'test', ready: async () => true, migrationReady: async () => true,
+    async stat() { if (!writes.length) throw Object.assign(new Error('missing'), { upstreamStatus: 404 }) },
+    async writeMemory(...args) {
+      writes.push(args)
+      if (writes.length === 1) return new Promise(resolve => { settle = resolve })
+      return { vector_status: 'complete' }
+    } }
+  const options = { dataDir, sourceFile, client, journal: {}, coexistence: true, autoResume: false, pollMs: 100000 }
+  let svc = new LegacyMigration(options)
+  t.after(() => { settle?.({ vector_status: 'queued' }); svc.stop() })
+  assert.equal(svc.status().pendingCount, 1)
+  assert.equal((await svc.start()).started, true)
+  const writing = svc.run()
+  await waitFor(() => writes.length === 1)
+  const { sourceRevision, totalBatches, pendingCount } = svc.status()
+  assert.equal(totalBatches, 0)
+  assert.equal(pendingCount, 1)
+  await assert.rejects(svc.activate(sourceRevision), { status: 409 })
+  settle({ vector_status: 'queued' })
+  await writing
+  assert.equal(svc.status().readyForCutover, false)
+  assert.equal(JSON.parse(fs.readFileSync(svc.file)).projectMemories[0].status, 'pending')
+  svc.stop()
+  svc = new LegacyMigration(options)
+  await svc.run()
+  const [uri, serialized, opts] = writes[0]
+  assert.equal(uri, 'viking://user/test/memories/entities/prj_verify_01/release-flow.md')
+  assert.equal(serialized.split('\n\n<!-- MEMORY_FIELDS')[0], content)
+  assert.match(serialized, /"created_at": "2023-05-07T01:02:03.000Z"/)
+  assert.match(serialized, /"updated_at": "2026-11-20T03:20:00.000Z"/)
+  assert.deepEqual(opts, { mode: 'replace', tags: ['project_id=prj_verify_01'], wait: true })
+  assert.deepEqual(writes[1], [uri, content, opts])
+  assert.equal(svc.status().pendingCount, 0)
+  assert.equal(svc.status().readyForCutover, true)
+  assert.equal((await svc.activate(sourceRevision)).activated, true)
 })
 test('manual-only start, accepted is pending, restart resumes exactly one submission, completion persists', async t => {
   const dir = root(t), sourceFile = sourceDb(dir)

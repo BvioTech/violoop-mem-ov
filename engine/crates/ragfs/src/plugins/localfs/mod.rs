@@ -19,6 +19,7 @@ use crate::core::errors::{Error, Result};
 use crate::core::filesystem::{validate_virtual_path, FileSystem};
 use crate::core::glob::{decode_offset_token, encode_offset_token, PreparedGlob};
 use crate::core::grep::GrepLineCollector;
+use crate::core::internal_names::is_hidden_runtime_lock_name;
 use crate::core::plugin::ServicePlugin;
 use crate::core::types::{
     ConfigParameter, FileInfo, GlobEntry, GlobPage, GrepContextLine, GrepOptions, GrepResult,
@@ -247,7 +248,7 @@ impl LocalFileSystem {
                 filelocks::LockKind::Exclusive,
                 filelocks::LockMode::NonBlocking,
             )
-            .map_err(|e| Self::map_lock_error("compare_and_write", &e.to_string()))?;
+            .map_err(|e| Self::map_lock_error("compare_and_write", e))?;
         let file = lock.file_mut();
         if !Self::open_file_matches_path(&file, &local_path)? {
             return Ok(false);
@@ -301,7 +302,7 @@ impl LocalFileSystem {
                 filelocks::LockKind::Exclusive,
                 filelocks::LockMode::NonBlocking,
             )
-            .map_err(|e| Self::map_lock_error("compare_and_remove", &e.to_string()))?;
+            .map_err(|e| Self::map_lock_error("compare_and_remove", e))?;
         let file = lock.file_mut();
         if !Self::open_file_matches_path(&file, &local_path)? {
             return Ok(false);
@@ -323,17 +324,74 @@ impl LocalFileSystem {
     }
 
     /// Map a non-blocking file-lock acquisition error into a retryable filesystem error.
-    fn map_lock_error(operation: &str, error: &str) -> Error {
-        if error.to_ascii_lowercase().contains("would block") {
-            return Error::would_block(format!("failed to lock for {operation}: {error}"));
+    fn map_lock_error(operation: &str, error: filelocks::Error) -> Error {
+        match error {
+            filelocks::Error::WouldBlock => {
+                Error::would_block(format!("failed to lock for {operation}: lock would block"))
+            }
+            filelocks::Error::Io(error) if Self::is_lock_contention(&error) => {
+                Error::would_block(format!("failed to lock for {operation}: {error}"))
+            }
+            other => Error::plugin(format!("failed to lock for {operation}: {other}")),
         }
-        Error::plugin(format!("failed to lock for {operation}: {error}"))
+    }
+
+    fn is_lock_contention(error: &io::Error) -> bool {
+        if error.kind() == ErrorKind::WouldBlock {
+            return true;
+        }
+        // Windows sharing and byte-range lock violations are transient, even
+        // when the competing handle belongs to this same process.
+        #[cfg(windows)]
+        if matches!(error.raw_os_error(), Some(32 | 33)) {
+            return true;
+        }
+        false
+    }
+
+    /// Coordinate token reads with the exclusive CAS used by lease refresh.
+    /// Keep the guard through read_to_end so readers cannot see a truncated token.
+    fn read_lock_file(local_path: PathBuf, path: String) -> Result<Vec<u8>> {
+        use std::io::Read;
+        use std::time::{Duration, Instant};
+
+        let deadline = Instant::now() + Duration::from_millis(250);
+        loop {
+            let result = (|| {
+                let file =
+                    fs::File::open(&local_path).map_err(|e| Self::map_error(&path, e))?;
+                let mut lock = filelocks::LockOptions::new()
+                    .backend(filelocks::LockBackend::Fcntl)
+                    .lock(
+                        file,
+                        filelocks::LockKind::Shared,
+                        filelocks::LockMode::NonBlocking,
+                    )
+                    .map_err(|e| Self::map_lock_error("read lock token", e))?;
+                let mut data = Vec::new();
+                lock.file_mut()
+                    .read_to_end(&mut data)
+                    .map_err(|e| Self::map_error(&path, e))?;
+                Ok(data)
+            })();
+            match result {
+                Err(Error::WouldBlock(_)) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(5).min(
+                        deadline.saturating_duration_since(Instant::now()),
+                    ));
+                }
+                other => return other,
+            }
+        }
     }
 
     /// Map local file failures into stable filesystem error categories.
     fn map_error(path: &str, error: std::io::Error) -> Error {
         if error.kind() == std::io::ErrorKind::NotFound {
             return Error::NotFound(path.to_string());
+        }
+        if Self::is_lock_contention(&error) {
+            return Error::would_block(format!("failed to read '{path}': {error}"));
         }
         Error::plugin(format!("failed to read file: {}", error))
     }
@@ -834,7 +892,16 @@ impl FileSystem for LocalFileSystem {
         }
 
         // Read file
-        let data = fs::read(&local_path).map_err(|e| Self::map_error(path, e))?;
+        let data = if local_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(is_hidden_runtime_lock_name)
+        {
+            let path = path.to_string();
+            Self::run_blocking_fs(move || Self::read_lock_file(local_path, path)).await?
+        } else {
+            fs::read(&local_path).map_err(|e| Self::map_error(path, e))?
+        };
 
         // Apply offset and size
         let file_size = data.len() as u64;
@@ -1364,9 +1431,33 @@ mod tests {
     fn test_localfs_maps_would_block_lock_errors() {
         let err = LocalFileSystem::map_lock_error(
             "compare_and_remove",
-            "failed to lock for compare_and_remove: lock would block",
+            filelocks::Error::WouldBlock,
         );
         assert!(matches!(err, Error::WouldBlock(_)));
+    }
+
+    #[test]
+    fn test_localfs_does_not_retry_permission_errors() {
+        let err = LocalFileSystem::map_error(
+            "/.path.ovlock",
+            io::Error::new(ErrorKind::PermissionDenied, "access denied"),
+        );
+        assert!(!matches!(err, Error::WouldBlock(_)));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_localfs_maps_windows_sharing_and_lock_violations() {
+        for code in [32, 33] {
+            let err = LocalFileSystem::map_error(
+                "/.path.ovlock",
+                io::Error::from_raw_os_error(code),
+            );
+            assert!(matches!(err, Error::WouldBlock(_)));
+        }
+        assert!(!LocalFileSystem::is_lock_contention(
+            &io::Error::from_raw_os_error(5),
+        ));
     }
 
     #[tokio::test]

@@ -12,5 +12,5 @@ openviking:
   user: default
   actor_peer: violoop
   timeout_ms: 15000
-  recall_max_chars: 600
-  search_max_chars: 6000
+  recall_max_chars: 8000
+  search_max_chars: 8000

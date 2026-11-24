@@ -2,6 +2,7 @@
 // constructor initializes schema and changes journal settings.
 const crypto = require('crypto')
 const fs = require('fs')
+const { isProjectId } = require('./openviking_manual')
 const hash = value => crypto.createHash('sha256').update(String(value)).digest('hex')
 const parse = (value, fallback) => value ? JSON.parse(value) : fallback
 
@@ -51,11 +52,23 @@ function readLegacySnapshot(file) {
 
 // Same observation fingerprint used by the legacy provenanceByKey method.
 function observationHash(text) { return crypto.createHash('md5').update(String(text ?? '')).digest('hex') }
+function legacyProjectKey(key) {
+  const match = /^projects\.([^.]+)\.([\s\S]+)$/.exec(key)
+  if (!match || !isProjectId(match[1])) return null
+  const name = match[2].trim()
+  return name ? { projectId: match[1], name } : null
+}
 // Access counters and graphification bookkeeping are not new user facts.
 function legacyFacts(snapshot) {
   const facts = []
   const add = (kind, value) => facts.push(hash(JSON.stringify([kind, value])))
-  for (const m of snapshot.memories) add('memory', [m.id, m.key, m.title, m.content, m.type, m.tags])
+  for (const m of snapshot.memories) {
+    const fields = [m.id, m.key, m.title, m.content, m.type, m.tags]
+    // Project timestamps are persisted in the native file. This also makes a
+    // pre-fix staging checkpoint catch up if it extracted the note generically.
+    if (legacyProjectKey(m.key)) add('project-memory', [...fields, m.created_at, m.updated_at])
+    else add('memory', fields)
+  }
   for (const e of snapshot.entities) {
     add('entity', [e.id, e.name, e.type, e.aliases, e.properties, e.domains, e.curated])
     for (const observation of e.observations) add('observation', [e.id, observation])
@@ -64,4 +77,4 @@ function legacyFacts(snapshot) {
     r.properties, r.confidence, r.valid_until, r.decay])
   return [...new Set(facts)].sort()
 }
-module.exports = { readLegacySnapshot, observationHash, hash, legacyFacts }
+module.exports = { readLegacySnapshot, observationHash, hash, legacyFacts, legacyProjectKey }

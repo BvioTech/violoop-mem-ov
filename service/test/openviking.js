@@ -12,7 +12,7 @@ const { createApp, start } = require('../server')
 const { loadConfig } = require('../config')
 const { OpenVikingClient } = require('../openviking_client')
 const { mergeSearch } = require('../hybrid_search')
-const { boundPreviews } = require('../retrieval_budget')
+const { boundPreviews, TRUNCATION_MARKER } = require('../retrieval_budget')
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-ov-'))
 const socket = path.join(temp, 'mem.sock')
@@ -181,7 +181,9 @@ test('license endpoint offers the AGPL-3.0 source location regardless of backend
 })
 
 test('device health reflects backend readiness; boot catalogues retain wire shapes', async () => {
-  assert.equal((await request('GET', '/healthz')).body.backend, 'openviking')
+  const health = await request('GET', '/healthz')
+  assert.equal(health.status, 200)
+  assert.deepEqual(health.body, { status: 'ok', backend: 'openviking', capabilities: { projectMemoryTags: true } })
   assert.equal((await request('GET', '/readyz')).body.ready, true)
   ready = false
   assert.equal((await request('GET', '/readyz')).status, 503)
@@ -244,12 +246,12 @@ test('hybrid search runs both native branches concurrently and merges actual key
     assert.equal(hits[0].keywordMatches.length, 1)
     assert.ok(hits[0].content.includes('Deployment preferences'))
     assert.ok(hits[0].content.includes('海拉尔项目部署的原始证据'))
-    assert.ok(hits[0].truncated)
+    assert.equal(hits[0].truncated, false)
     const keyword = hits.find(h => h.retrievalSources.length === 1 && h.retrievalSources[0] === 'keyword')
     assert.equal(keyword.score, null)
     assert.equal(keyword.semanticScore, null)
     assert.ok(keyword.content.includes('呼伦贝尔航班安排'))
-    assert.ok(hits.every(h => h.content.length <= 800))
+    assert.ok(hits.some(h => h.content.length > 800))
     assert.ok(hits.reduce((n, h) => n + h.content.length, 0) <= 8000)
   } finally { behavior = 'ok'; releaseHybridSearch?.(); releaseHybridSearch = undefined }
 })
@@ -315,10 +317,10 @@ test('hybrid evidence obeys a shared body budget across many documents and an ex
     key: `viking://user/test/memories/s-${i}.md`, abstract: '语义摘要'.repeat(1000), level: 2, score: 0.9 - i * 0.01 }))
   const matches = Array.from({ length: 40 }, (_, i) => ({ uri: `viking://user/test/memories/k-${i}.md`, line: 7, content: '关键词证据'.repeat(1000) }))
   const hits = mergeSearch(semantic, matches, { limit: 50, maxChars: 8000 })
-  assert.equal(hits.length, 10)
-  assert.equal(new Set(hits.map(h => h.uri)).size, 10)
-  assert.deepEqual(hits.filter(h => h.group === 'semantic').map(h => h.uri), semantic.slice(0, 5).map(h => h.uri))
-  assert.deepEqual(hits.filter(h => h.group === 'keyword').map(h => h.uri), matches.slice(0, 5).map(h => h.uri))
+  assert.equal(hits.length, 20)
+  assert.equal(new Set(hits.map(h => h.uri)).size, 20)
+  assert.deepEqual(hits.filter(h => h.group === 'semantic').map(h => h.uri), semantic.slice(0, 10).map(h => h.uri))
+  assert.deepEqual(hits.filter(h => h.group === 'keyword').map(h => h.uri), matches.slice(0, 10).map(h => h.uri))
   assert.ok(hits.reduce((n, h) => n + h.content.length, 0) <= 8000)
   assert.ok(hits.every(h => h.content.length <= 800 && h.truncated && h.truncationNotice))
   assert.ok(hits.filter(h => h.retrievalSources[0] === 'keyword').every(h => h.score === null))
@@ -371,8 +373,8 @@ test('grep calls native grep only, preserving regex, file scope and line evidenc
   assert.equal(result.body.matches[0].level, 2)
   assert.equal(result.body.matches[0].content, '海拉尔旅行计划')
   assert.ok(!Object.hasOwn(result.body.matches[0], 'score'))
-  assert.equal(result.body.matches[1].content.length, 600)
-  assert.equal(result.body.matches[1].truncated, true)
+  assert.equal(result.body.matches[1].content.length, 4000)
+  assert.equal(result.body.matches[1].truncated, false)
   assert.equal(result.body.filesScanned, 3)
   const fileScope = 'viking://user/test/memories/.overview.md'
   await request('POST', '/v1/grep', { pattern: 'BGE', prefix: fileScope, limit: 3, caseInsensitive: true })
@@ -455,7 +457,7 @@ test('retired recall score environment/config values do not restore a default ga
 test('recall fetches top ten across all levels and bounds each returned preview', async () => {
   behavior = 'mixed_recall'
   try {
-    for (const body of [{ text: '部署'.repeat(1000) }, { text: '部署'.repeat(1000), maxEntities: 50 }]) {
+    for (const body of [{ text: '部署'.repeat(1000), budgetChars: 2500 }, { text: '部署'.repeat(1000), maxEntities: 50, budgetChars: 2500 }]) {
       const result = await request('POST', '/v2/recall', body)
       assert.equal(result.status, 200)
       assert.equal(result.body.results.length, 10)
@@ -752,11 +754,11 @@ test('search defaults to ten candidates per branch and packs long hybrid results
         assert.equal(result.status, 200)
         const hits = result.body.results
         const hybrid = keywords?.length > 0
-        assert.equal(hits.length, 10)
+        assert.equal(hits.length, hybrid ? 20 : 10)
         assert.equal(calls.slice(start).find(c => c.route === '/api/v1/search/search').body.limit, 10)
         if (hybrid) {
-          assert.equal(hits.filter(h => h.group === 'semantic').length, 5)
-          assert.equal(hits.filter(h => h.group === 'keyword').length, 5)
+          assert.equal(hits.filter(h => h.group === 'semantic').length, 10)
+          assert.equal(hits.filter(h => h.group === 'keyword').length, 10)
         }
         assert.ok(hits.every(h => h.content.length <= 800 && h.truncated && h.truncationNotice.includes('memory.get')))
         assert.ok(hits.reduce((n, h) => n + h.content.length, 0) <= 8000)
@@ -769,7 +771,7 @@ test('search defaults to ten candidates per branch and packs long hybrid results
     const start = calls.length
     const capped = await request('POST', '/v1/search', { query: '检索预算测试', keywords: ['词'], limit: 20 })
     assert.equal(calls.slice(start).find(c => c.route.endsWith('/search')).body.limit, 10)
-    assert.equal(capped.body.results.length, 10)
+    assert.equal(capped.body.results.length, 20)
   } finally { behavior = 'ok' }
 })
 
@@ -781,14 +783,14 @@ test('preview budgets preserve ranking, redistribute unused space, and flag only
   assert.equal(hits[1].truncated, false)
   assert.ok(!hits[1].truncationNotice)
   assert.equal(boundPreviews([make('a'.repeat(800))], 8000)[0].truncated, false)
-  assert.equal(boundPreviews([make('a'.repeat(801))], 8000)[0].content.length, 800)
+  assert.equal(boundPreviews([make('a'.repeat(801))], 8000)[0].content.length, 801)
   assert.equal(boundPreviews([make('short', true)], 8000)[0].truncated, true)
   assert.deepEqual(boundPreviews([], 8000), [])
 })
 
 test('retrieval budgets and file-reading budgets have independent defaults', () => {
   const cfg = loadConfig([], {}).openviking
-  assert.equal(cfg.recallMaxChars, 2500)
+  assert.equal(cfg.recallMaxChars, 8000)
   assert.equal(cfg.searchMaxChars, 8000)
   assert.equal(cfg.abstractMaxChars, 600)
   assert.equal(cfg.readMaxChars, 6000)
@@ -804,13 +806,16 @@ test('short hybrid previews may retain all twenty candidates without a ten-resul
   assert.deepEqual(hits.filter(h=>h.group==='keyword').map(h=>h.uri),matches.slice(0,10).map(h=>h.uri))
   assert.ok(hits.every(h=>!h.truncated))
 })
-test('hybrid packing stops at the first non-fitting preview without shrinking or skipping it', () => {
+test('hybrid packing retains both pools and redistributes the short-entry savings', () => {
   const semantic = [0,1].map(i=>({uri:`viking://user/test/memories/s${i}.md`,abstract:'s'.repeat(1200),score:0.9,level:2}))
   const matches = [{uri:'viking://user/test/memories/k0.md',line:1,content:'k'.repeat(1200)}, {uri:'viking://user/test/memories/k1.md',line:1,content:'tiny'}]
   for (const maxChars of [1600,2000]) {
     const hits=mergeSearch(semantic,matches,{maxChars})
-    assert.deepEqual(hits.map(h=>h.uri),[semantic[0].uri,matches[0].uri])
-    assert.deepEqual(hits.map(h=>h.content.length),[800,800])
+    assert.deepEqual(hits.map(h=>h.uri),[...semantic.map(h=>h.uri), ...matches.map(h=>h.uri)])
+    assert.equal(hits[3].truncated, false)
+    assert.equal(hits[3].content, '[Keyword]\n[L2 line 1] tiny')
+    assert.equal(hits.reduce((sum,h)=>sum+h.content.length,0),maxChars)
+    assert.ok(hits.slice(0,3).every(h=>h.truncated && h.content.endsWith(TRUNCATION_MARKER)))
   }
 })
 test('hybrid packing continues the remaining branch after one pool is exhausted', () => {
@@ -828,4 +833,107 @@ test('dual matches use one budget slot and keyword pool is capped before cross-b
   assert.ok(hits[0].content.includes('summary') && hits[0].content.includes('shared evidence'))
   assert.equal(hits.filter(h=>h.uri===semantic[0].uri).length,1)
   assert.ok(!hits.some(h=>h.uri===matches[10].uri))
+})
+
+test('default hybrid budget preserves keyword match lines alongside a clipped semantic summary', () => {
+  const semantic = Array.from({ length: 10 }, (_, i) => ({
+    uri: `viking://user/test/memories/s${i}.md`, abstract: 'Semantic summary. '.repeat(100), score: 0.9, level: 2,
+  }))
+  const matches = [
+    { uri: semantic[0].uri, line: 7, content: 'Exact keyword match: rollout procedure' },
+    { uri: semantic[0].uri, line: 12, content: 'Exact keyword match: rollback procedure' },
+  ]
+  const hits = mergeSearch(semantic, matches)
+  assert.equal(hits.length, 10)
+  const [dual] = hits
+  assert.deepEqual(dual.retrievalSources, ['semantic', 'keyword'])
+  assert.ok(dual.content.startsWith('[Semantic]\nSemantic summary. '))
+  assert.ok(dual.content.endsWith('\n[Keyword]\n[L2 line 7] Exact keyword match: rollout procedure\n[L2 line 12] Exact keyword match: rollback procedure'))
+  assert.equal(dual.abstract, dual.content)
+  assert.equal(dual.truncated, true)
+  assert.ok(dual.truncationNotice)
+  assert.ok(hits.reduce((sum, hit) => sum + hit.content.length, 0) <= 8000)
+})
+
+test('dual previews respect tiny budgets and let a short semantic section keep its text', () => {
+  const semantic = [{ uri, abstract: 'Summary', score: 0.9, level: 2 }]
+  const matches = [{ uri, line: 1, content: 'Keyword match. '.repeat(100) }]
+  const headerLength = '[Semantic]\n\n[Keyword]\n'.length
+  for (const maxChars of [1, headerLength, headerLength + 1]) {
+    const [dual] = mergeSearch(semantic, matches, { maxChars })
+    assert.ok(dual.content.length <= maxChars)
+    assert.equal(dual.truncated, true)
+    assert.ok(dual.truncationNotice)
+  }
+  const [minimal] = mergeSearch(semantic, matches, { maxChars: headerLength + 2 })
+  assert.equal(minimal.content, '[Semantic]\n…\n[Keyword]\n…')
+  const [dual] = mergeSearch(semantic, matches, { maxChars: 80 })
+  assert.ok(dual.content.startsWith('[Semantic]\nSummary\n[Keyword]\n[L2 line 1] Keyword match. '))
+  assert.ok(dual.content.endsWith(TRUNCATION_MARKER))
+  assert.equal(dual.content.length, 80)
+  assert.equal(dual.truncated, true)
+  assert.ok(dual.truncationNotice)
+})
+
+
+test('prefix clipping counts its marker, preserves source data and handles tiny Unicode budgets', () => {
+  const original={content:'HEAD'+'x'.repeat(10000)+'TAIL',score:0.8}
+  const before=JSON.stringify(original)
+  const [hit]=boundPreviews([original],1000)
+  assert.equal(hit.content.length,1000)
+  assert.equal(hit.content,'HEAD'+'x'.repeat(1000-TRUNCATION_MARKER.length-4)+TRUNCATION_MARKER)
+  assert.ok(hit.truncated && hit.truncationNotice)
+  assert.equal(JSON.stringify(original),before)
+  assert.equal(boundPreviews([original],original.content.length)[0].content,original.content)
+  for(let budget=1;budget<100;budget++) {
+    const [unicode]=boundPreviews([{content:'😀'.repeat(100)}],budget)
+    assert.ok(unicode.content.length<=budget)
+    assert.ok(unicode.content.isWellFormed())
+    assert.ok(unicode.truncated)
+  }
+})
+
+test('HTTP budgets apply to recall, search, hybrid and grep, and reject invalid input before native traffic', async () => {
+  behavior='search_limits'
+  try {
+    for(const [route,body,field] of [
+      ['/v2/recall',{text:'check memory budget',maxEntities:1},'results'],
+      ['/v1/search',{query:'check memory budget',limit:1},'results'],
+      ['/v2/search',{query:'check memory budget',limit:1,keywords:['word']},'results'],
+      ['/v1/grep',{pattern:'word',limit:1},'matches'],
+    ]) {
+      const result=await request('POST',route,{...body,budgetChars:1000})
+      assert.equal(result.status,200)
+      assert.equal(result.body[field].reduce((sum,h)=>sum+h.content.length,0),1000)
+      assert.ok(result.body[field].every(h=>h.truncated && h.content.endsWith(TRUNCATION_MARKER)))
+      for(const budgetChars of [0,-1,1.5,'1000',null,100001]) {
+        const start=calls.length
+        assert.equal((await request('POST',route,{...body,budgetChars})).status,400)
+        assert.equal(calls.length,start)
+      }
+      assert.equal((await request('POST',route,{...body,budgetChars:100000})).status,200)
+    }
+    const defaults=await request('POST','/v2/recall',{text:'check memory budget'})
+    assert.equal(defaults.body.results.reduce((sum,h)=>sum+h.content.length,0),8000)
+    const compatibility=await request('POST','/v2/recall',{text:'check memory budget',maxEntities:1})
+    assert.equal(compatibility.body.results[0].truncated,false)
+    assert.equal(compatibility.body.entities[0].truncated,true)
+    assert.equal(compatibility.body.entities[0].observations.join('').length,800)
+    const single=await request('POST','/v1/search',{query:'check memory budget',limit:1})
+    assert.equal(single.body.results[0].content.length,2000)
+    assert.equal(single.body.results[0].truncated,false)
+  } finally { behavior='ok' }
+})
+
+test('explicit find keeps short proactive queries without the automatic recall gate', async () => {
+  let start=calls.length
+  const result=await request('POST','/v1/search',{query:'张三',mode:'find',limit:3,budgetChars:1200,sessionId:'unused'})
+  assert.equal(result.status,200)
+  assert.equal(calls.length,start+1)
+  assert.equal(calls.at(-1).route,'/api/v1/search/find')
+  assert.equal(calls.at(-1).body.query,'张三')
+  assert.ok(!Object.hasOwn(calls.at(-1).body,'session_id'))
+  start=calls.length
+  assert.deepEqual((await request('POST','/v2/recall',{text:'张三'})).body.results,[])
+  assert.equal(calls.length,start)
 })

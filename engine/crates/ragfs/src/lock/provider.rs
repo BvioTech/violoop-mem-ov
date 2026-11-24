@@ -276,6 +276,10 @@ impl FilesystemPathLockProvider {
         }
         match result {
             Ok(data) => Ok(Some(data)),
+            Err(crate::core::Error::WouldBlock(message)) => Err(PathLockError::Busy {
+                lock_path: lock_path.to_string(),
+                operation: format!("read lock token ({message})"),
+            }),
             Err(e) => {
                 if matches!(
                     e,
@@ -308,6 +312,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::core::{Error, FileSystem, WriteFlag};
+    use crate::plugins::localfs::LocalFileSystem;
     use crate::plugins::memfs::MemFileSystem;
 
     use super::*;
@@ -384,6 +389,129 @@ mod tests {
             Error::WouldBlock("lock would block".to_string()),
         );
         assert!(matches!(err, PathLockError::Busy { .. }));
+    }
+
+    fn lock_test_file(path: &std::path::Path) -> filelocks::FileLock {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        filelocks::LockOptions::new()
+            .backend(filelocks::LockBackend::Fcntl)
+            .lock(
+                file,
+                filelocks::LockKind::Exclusive,
+                filelocks::LockMode::NonBlocking,
+            )
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn local_lock_read_waits_for_complete_token() {
+        use std::io::{Seek, SeekFrom, Write};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".path.ovlock");
+        std::fs::write(&path, b"owner:123:E").unwrap();
+        let mut guard = lock_test_file(&path);
+        // Model refresh between truncation and writing the replacement token.
+        guard.file_mut().set_len(0).unwrap();
+        let fs = Arc::new(LocalFileSystem::new(dir.path().to_str().unwrap()).unwrap());
+        let provider = FilesystemPathLockProvider::new(fs, 30.0);
+        let reader = tokio::spawn(async move { provider.read_token("/.path.ovlock").await });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!reader.is_finished(), "read must wait for the writer's lock");
+        guard.file_mut().seek(SeekFrom::Start(0)).unwrap();
+        guard.file_mut().write_all(b"owner:456:E").unwrap();
+        drop(guard);
+
+        let token = reader.await.unwrap().unwrap().unwrap();
+        assert_eq!(token.time_ns, 456);
+        assert_eq!(token.owner_id, "owner");
+    }
+
+    #[tokio::test]
+    async fn local_lock_read_timeout_is_busy_and_can_be_retried() {
+        use std::time::{Duration, Instant};
+
+        let dir = tempfile::tempdir().unwrap();
+        // Exact lock sidecars need the same protection as directory locks.
+        let name = "/.exact.ovlock.notes.md.0123456789abcdef";
+        let path = dir.path().join(&name[1..]);
+        std::fs::write(&path, b"owner:123:E").unwrap();
+        let guard = lock_test_file(&path);
+        let fs = Arc::new(LocalFileSystem::new(dir.path().to_str().unwrap()).unwrap());
+        let provider = FilesystemPathLockProvider::new(fs, 30.0);
+        let started = Instant::now();
+        let result = tokio::time::timeout(Duration::from_secs(5), provider.read_token(name))
+            .await
+            .unwrap();
+        assert!(matches!(result, Err(PathLockError::Busy { lock_path, .. }) if lock_path == name));
+        assert!(started.elapsed() >= Duration::from_millis(250));
+        drop(guard);
+        assert_eq!(
+            provider.read_token(name).await.unwrap().unwrap().time_ns,
+            123
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn local_lock_reads_race_with_refresh_without_invalid_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let fs = Arc::new(LocalFileSystem::new(dir.path().to_str().unwrap()).unwrap());
+        let provider = Arc::new(FilesystemPathLockProvider::new(fs, 30.0));
+        let token = LockToken {
+            owner_id: "owner".to_string(),
+            time_ns: 1,
+            lock_type: crate::lock::PathLockKind::Tree,
+        };
+        provider
+            .try_create_token("/.path.ovlock", &token)
+            .await
+            .unwrap();
+        let writer_provider = provider.clone();
+        let writer = tokio::spawn(async move {
+            for time_ns in 2..=200 {
+                loop {
+                    match writer_provider
+                        .refresh_token("/.path.ovlock", "owner", time_ns)
+                        .await
+                    {
+                        Ok(true) => break,
+                        Err(PathLockError::Busy { .. }) => tokio::task::yield_now().await,
+                        other => panic!("unexpected refresh result: {other:?}"),
+                    }
+                }
+            }
+        });
+        let mut readers = Vec::new();
+        for _ in 0..3 {
+            let provider = provider.clone();
+            readers.push(tokio::spawn(async move {
+                for _ in 0..200 {
+                    match provider.read_token("/.path.ovlock").await {
+                        Ok(Some(token)) => {
+                            assert_eq!(token.owner_id, "owner");
+                            assert!((1..=200).contains(&token.time_ns));
+                        }
+                        Err(PathLockError::Busy { .. }) => (),
+                        other => panic!("unexpected read result: {other:?}"),
+                    }
+                }
+            }));
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(10), writer)
+            .await
+            .expect("refresh should not starve behind readers")
+            .unwrap();
+        for reader in readers {
+            reader.await.unwrap();
+        }
+        assert_eq!(
+            provider.read_token("/.path.ovlock").await.unwrap().unwrap().time_ns,
+            200
+        );
     }
 }
 

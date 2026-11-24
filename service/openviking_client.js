@@ -62,16 +62,17 @@ class OpenVikingClient {
   }
 
   retrieve(query, { mode, limit, minScore, targetUri, sessionId, level, readContent = false,
-    tags, since, until, timeField, contextType, includeProvenance, filter, eventsTimeDecayProtection } = {}) {
-    return this.request('POST', `/api/v1/search/${mode === 'recall' ? 'find' : 'search'}`, {
+    tags, since, until, timeField, contextType, includeProvenance, filter, eventsTimeDecayProtection, offset } = {}) {
+    const find = mode === 'recall' || mode === 'find'
+    return this.request('POST', `/api/v1/search/${find ? 'find' : 'search'}`, {
       query, limit, read_content: readContent,
       ...(level === undefined ? {} : { level }),
       ...(minScore === undefined ? {} : { score_threshold: minScore }),
       ...(targetUri ? { target_uri: targetUri } : {}),
-      ...(sessionId && mode !== 'recall' ? { session_id: sessionId } : {}),
+      ...(sessionId && !find ? { session_id: sessionId } : {}),
       ...Object.fromEntries(Object.entries({ tags, since, until, time_field: timeField,
         events_time_decay_protection: eventsTimeDecayProtection,
-        context_type: contextType, include_provenance: includeProvenance, filter }).filter(([, v]) => v !== undefined)),
+        context_type: contextType, include_provenance: includeProvenance, filter, offset }).filter(([, v]) => v !== undefined)),
     })
   }
 
@@ -79,11 +80,24 @@ class OpenVikingClient {
     return this.request('POST', '/api/v1/system/wait', { timeout: 1 }, { timeoutMs: 3000 })
   }
 
+  async setOutputLanguage(language) {
+    const result = await this.request('PATCH', '/api/v1/admin/configuration', {
+      settings: { output_language_override: language },
+    })
+    if (result?.settings?.output_language_override !== language) {
+      throw new Error('OpenViking did not confirm the output language')
+    }
+  }
+
   stat(uri) { return this.request('GET', '/api/v1/fs/stat?' + new URLSearchParams({ uri })) }
   attrs(uri) { return this.request('GET', '/api/v1/fs/attrs?' + new URLSearchParams({ uri })) }
-  writeMemory(uri, content, { mode, tags } = {}) {
+  setTags(uri, tags, mode) {
+    return this.request('POST', '/api/v1/content/set_tags', { uri, tags, mode })
+  }
+  writeMemory(uri, content, { mode, tags, wait = false } = {}) {
     return this.request('POST', '/api/v1/content/write', {
-      uri, content, mode, wait: false, ...(tags === undefined ? {} : { tags, tag_mode: 'replace' }),
+      uri, content, mode, wait, ...(wait ? { timeout: 90 } : {}),
+      ...(tags === undefined ? {} : { tags, tag_mode: 'replace' }),
     }, { timeoutMs: Math.max(this.timeoutMs, 120000) })
   }
   deleteMemory(uri) {
@@ -115,6 +129,12 @@ class OpenVikingClient {
   list(uri, { offset = 0, limit = 20 } = {}) {
     return this.request('GET', '/api/v1/fs/ls?' + new URLSearchParams({ uri, offset, limit,
       output: 'agent', include_abstract: true, include_overview: false,
+    }), undefined, { raw: true })
+  }
+
+  tree(uri, { depth, offset, limit }) {
+    return this.request('GET', '/api/v1/fs/tree?' + new URLSearchParams({ uri, offset, limit,
+      level_limit: depth, output: 'original', include_abstract: false, include_overview: false,
     }), undefined, { raw: true })
   }
 

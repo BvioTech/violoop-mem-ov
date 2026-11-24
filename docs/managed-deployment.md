@@ -6,6 +6,35 @@ For Debian 12 ARM64: install Node 24, Python 3.11, uv, native build prerequisite
 
 Models remain in the separate `violoop-mem-model` package. Optional remote migration embedding settings and Device model routing retain their existing protocol. Secret files are provisioned outside Git. The source archive and provenance manifest accompany the runtime; no second OpenViking checkout is required.
 
+## Memory output language
+
+Managed Memory reads the paired user's language from Device's loopback
+`GET /settings/language` endpoint on the same origin as
+`OPENVIKING_DEVICE_MODEL_URL`. An explicit selection wins; `system`/`auto`
+uses the resolved PC OS language. Tags are normalized (`zh` becomes `zh-CN`),
+and unresolved `system` is never sent to the model as a language name.
+
+The service subscribes to Device's `settings:language` SSE events and refreshes
+the snapshot every five seconds, including after reconnecting. It pauses new
+memory submissions and migration scheduling, drains accepted work, then updates
+OpenViking's `output_language_override` through the authenticated native runtime
+configuration API. No process restart is needed. This applies to subsequent
+extraction, summaries/overviews and consolidation; it does not translate existing
+memory files. Standby remains paused after a language update.
+
+The last confirmed language is stored in `<dataDir>/language-state.json` and
+included in the generated `ov.conf` on restart. If Device is temporarily
+unavailable, that confirmed value remains usable. With no confirmed value,
+Memory stays unready and retries synchronization rather than guessing from the
+Memory host's locale or timezone. A failed native configuration update also
+keeps new work gated until it succeeds. `/runtimez` exposes `language.ready`,
+`language.language`, `language.desired`, and any synchronization error.
+
+This uses an instance-wide OpenViking override, matching the current managed
+service's fixed account/user. External OpenViking mode remains externally
+configured. Deploy the Python engine and Node adapter from the same revision;
+older engines do not expose this parameter through the runtime PATCH API.
+
 ## Portable simulator
 
 The Device simulator packager uses `mem/service/server.js`, `mem/openviking-python/`, and `runtime/python/` beside `runtime/node`. The service resolves that bundled interpreter and package directory before source checkout or system defaults. `OPENVIKING_PYTHON` and `OPENVIKING_PYTHONPATH` remain explicit overrides. Source Windows checkouts use `.venv/Scripts/python.exe`.

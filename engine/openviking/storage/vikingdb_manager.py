@@ -482,6 +482,7 @@ class VikingDBManagerProxy:
         level: Optional[List[int]] = None,
         limit: int = 10,
         offset: int = 0,
+        order_by: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         return await self._manager.filter_in_tenant(
             self._ctx,
@@ -491,6 +492,7 @@ class VikingDBManagerProxy:
             level=level,
             limit=limit,
             offset=offset,
+            **({"order_by": order_by} if order_by is not None else {}),
         )
 
     async def get_context_by_uri(

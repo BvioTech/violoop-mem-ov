@@ -6,6 +6,7 @@ const { spawn } = require('child_process')
 const { Embedder } = require('./embedder')
 const { startModelGateway } = require('./model_gateway')
 const { createMigrationEmbedder } = require('./migration_embedding')
+const { readLanguageState, normalizeLanguage } = require('./language_sync')
 
 function groupId(name) {
   const line = fs.readFileSync('/etc/group', 'utf8').split('\n').find(l => l.split(':')[0] === name)
@@ -50,6 +51,7 @@ function nativeConfig(config, gatewayUrl, token, engineKey) {
     vlm: { provider: 'openai', api_base: gatewayUrl, api_key: token, model: 'violoop-memory',
       temperature: 0, max_tokens: config.openviking.llmMaxTokens, max_concurrent: 2, max_retries: 1 },
     memory: { link_enabled: true, custom_templates_dir: path.join(config.openviking.runtimeDir, 'memory-templates') },
+    output_language_override: config.openviking.outputLanguage || '',
     queue_workers: { session_commit: { max_concurrent: 1 }, add_resource: { max_concurrent: 1 },
       external_parse: { max_concurrent: 1 }, reindex: { max_concurrent: 1 }, external_task: { max_concurrent: 1 } },
     log: { level: 'WARNING', output: 'stdout' },
@@ -58,6 +60,7 @@ function nativeConfig(config, gatewayUrl, token, engineKey) {
 async function startRuntime(config, { spawnProcess = spawn, embedder = new Embedder(config.embedding) } = {}) {
   await embedder.resume?.()
   const options = config.openviking
+  options.outputLanguage = readLanguageState(config.dataDir) || ''
   if (!Number.isInteger(options.llmMaxTokens) || options.llmMaxTokens < 1 || options.llmMaxTokens > 65536) {
     throw new Error('OPENVIKING_LLM_MAX_TOKENS must be an integer from 1 to 65536')
   }
@@ -128,6 +131,10 @@ async function startRuntime(config, { spawnProcess = spawn, embedder = new Embed
   if (embedder.ensureLoaded) void embedder.ensureLoaded()
   return {
     engineKey, embedder,
+    setOutputLanguage(language) {
+      options.outputLanguage = normalizeLanguage(language)
+      require('./durable_json').writeJson(configPath, nativeConfig(config, gateway.url, token, engineKey))
+    },
     createEmbeddingApi: run => require('./embedding_api').createEmbeddingApi({ embedder, gatewayUrl: gateway.url, token, run }),
     async suspend() {
       gateway.setPaused(true)

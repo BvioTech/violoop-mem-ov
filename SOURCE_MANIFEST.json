@@ -9,13 +9,13 @@
           "path": "config.js",
           "sha256": "6cea5346c29fc6f68ac0ce90f1cf1a288540353d133fb8dcd2c2f0752a352552",
           "destination": "service/config.js",
-          "integration_sha256": "df28d723b70f9338266c75a78cb458d9663bffb47633c5e98e402d911f1ac621"
+          "integration_sha256": "dc08a3211f42808e5a57a658ce9ab1d16ee3a62972c68ff983ba8b1fc2bef0c5"
         },
         {
           "path": "deploy/openviking-adapter.yaml",
           "sha256": "a319daa2e1f0e0ba69a90a0e1269cb68ed85cfb624bf971499d08417a5ee7047",
           "destination": "deploy/openviking-adapter.yaml",
-          "integration_sha256": "c4d228f334fedb7fc4ef7882f85e320ca6d7ccffefe72da3635ef8fe1eea3ee2"
+          "integration_sha256": "b5d0ed3acbc2fab0041a560619774cdfc27e5362d9d5d3f41dfb4acff6ea7cd1"
         },
         {
           "path": "deploy/ov.conf.example",
@@ -37,7 +37,8 @@
         {
           "path": "docs/agent-memory.md",
           "sha256": "a780b6b46529aedc58c05ba394adee030f723274e65de2550e3bd7a9bd272b61",
-          "destination": "docs/agent-memory.md"
+          "destination": "docs/agent-memory.md",
+          "integration_sha256": "b2d1774b9d4438079730f8ee56d52408825e1078a3fc537ef4292f9da9aee1b2"
         },
         {
           "path": "docs/legacy-memory-migration.md",
@@ -49,7 +50,7 @@
           "path": "docs/managed-deployment.md",
           "sha256": "c7eb9c41f6ea1ce185beb556ca02a35e352e867108268d4f1c1670f8577eaaca",
           "destination": "docs/managed-deployment.md",
-          "integration_sha256": "b2920ba77462261a0d540bf967e8682b8908c62560ffeafae2be53483e3336c8"
+          "integration_sha256": "4a267aa82fac106ddc1297809d5d885e8d0c16b5dc2858505feb41bb110db7e1"
         },
         {
           "path": "durable_json.js",
@@ -75,7 +76,8 @@
         {
           "path": "hybrid_search.js",
           "sha256": "a9665311c262e0bfc7aa399c678c8cbe89713989cb8ca7673f14e708a79e8d92",
-          "destination": "service/hybrid_search.js"
+          "destination": "service/hybrid_search.js",
+          "integration_sha256": "6c15cb75720ccdf3cba6ce85559ad5c1c33572d8ba86166f8682375e60002a92"
         },
         {
           "path": "legacy_migration.js",
@@ -115,7 +117,7 @@
           "path": "openviking_adapter.js",
           "sha256": "ea24f404ce71756a6d8f9368bad303bbd61fc28539780862e81d0a6165acddfe",
           "destination": "service/openviking_adapter.js",
-          "integration_sha256": "30fd9a0e26ea86f1d26c2e20f1bf3e44109d3ed235484fc3e417a535d60a8c9f"
+          "integration_sha256": "b29991f2e3d5f0761f03cdfe26f76b72082b17998dd2271c36fa0bf3a8879767"
         },
         {
           "path": "openviking_agent.js",
@@ -126,7 +128,7 @@
           "path": "openviking_client.js",
           "sha256": "36ea9385c2b929960a977687d02ea40a15a628e4d89320a6e6e44a6175f6d0dd",
           "destination": "service/openviking_client.js",
-          "integration_sha256": "0b3560a46b94d30d7edf54268f2ff8ae9dbd492322a69393f17bb84cc247e9ea"
+          "integration_sha256": "2bbc6189dde2b3aa2c4b92ca74156bd4306cac1def0b69af1c548ce2c7f2d869"
         },
         {
           "path": "openviking_consolidation.js",
@@ -155,7 +157,7 @@
           "path": "openviking_runtime.js",
           "sha256": "ef94ce946ae077b47f6d8847cc440fef49fa1f97a181e5db1255740280435687",
           "destination": "service/openviking_runtime.js",
-          "integration_sha256": "cc65ff02b3ccef6b4174d364db7f6bb2268349efa10e35beb1955a201bd110e2"
+          "integration_sha256": "3300128a64464f29e8dc60c12c2ae11e73efc87c53c37dafc28f46168723a307"
         },
         {
           "path": "openviking_uri.js",
@@ -165,7 +167,8 @@
         {
           "path": "retrieval_budget.js",
           "sha256": "8cddfc31c2bedc55edbf7a1a9dbc2d1fa2a0dce985fe36cd19b2b4d23b6938c0",
-          "destination": "service/retrieval_budget.js"
+          "destination": "service/retrieval_budget.js",
+          "integration_sha256": "7c03247d5dd8c53af5e437c31117447574a57015c316cef296d07ffd0cc6bf3b"
         },
         {
           "path": "scripts/build-deb.sh",
@@ -231,7 +234,7 @@
           "path": "scripts/nfpm.yaml",
           "sha256": "44e2dc5dcaeee141a8ab8ac4e32044ffb005c357da6d414d573654cabedb2789",
           "destination": "scripts/nfpm.yaml",
-          "integration_sha256": "28e9d24b0d45d55901b17e50ca61b50b5ae326d7fff0a0086086041636eed0eb"
+          "integration_sha256": "ebde0df67d55f4a8540caa4ce641950e6ef4a5718cb0e5acfcbaa6ba30651495"
         },
         {
           "path": "scripts/openviking-live-smoke.js",
@@ -243,7 +246,7 @@
           "path": "server.js",
           "sha256": "8d2ce671d5a6074ee28b9e7509092771dbf70b3ec2fbb3a7937d465667941d2a",
           "destination": "service/server.js",
-          "integration_sha256": "1037665df34c8855795400b845ce9429e87ed32e8bd4a3da385adf7d9cf11ff8"
+          "integration_sha256": "f2b3c81aa68e2b68e9e24e66a0036e4eb83f227514af381afe61ad73fb7473b7"
         },
         {
           "path": "test/agent_memory.js",
@@ -289,7 +292,7 @@
           "path": "test/openviking.js",
           "sha256": "b570f0095bad7c69a67d0ff96262cbc01b753d5007fe3a64ac3f4c380a57447a",
           "destination": "service/test/openviking.js",
-          "integration_sha256": "d21a9f6af419e162499543c6eb2613e4e95add7eaf32ef72a70e1c186356510e"
+          "integration_sha256": "3971cf9cb86ec2aaab87ff250fe6f698fbc358086b86c18ac5c7cca88798790f"
         },
         {
           "path": "test/openviking_consolidation.js",
@@ -4721,7 +4724,8 @@
         {
           "path": "crates/ragfs/src/lock/provider.rs",
           "sha256": "9d92c054ebad1577f36fe0e195bf0a3736023c394d7b31cb568cb25420cbcf6b",
-          "destination": "engine/crates/ragfs/src/lock/provider.rs"
+          "destination": "engine/crates/ragfs/src/lock/provider.rs",
+          "integration_sha256": "136a7cefb73d08e13db06fd7030c3575e80c915c0ea89dcd16a217d0656e9301"
         },
         {
           "path": "crates/ragfs/src/lock/resolver.rs",
@@ -4781,7 +4785,8 @@
         {
           "path": "crates/ragfs/src/plugins/localfs/mod.rs",
           "sha256": "518636c210a2fe9503df1ace00b1e41813fb2039fbc6282e39f1a01c7a117a72",
-          "destination": "engine/crates/ragfs/src/plugins/localfs/mod.rs"
+          "destination": "engine/crates/ragfs/src/plugins/localfs/mod.rs",
+          "integration_sha256": "47510f4a59faeca50e3efd69874b6abe746874b2a84240412f5ffe994378e255"
         },
         {
           "path": "crates/ragfs/src/plugins/memfs/mod.rs",
@@ -18150,7 +18155,8 @@
         {
           "path": "openviking/server/routers/search.py",
           "sha256": "5ce47214d019c751f3362881a30d4e47b16f1c14f5b81b6f7fa4dcc6ffa93971",
-          "destination": "engine/openviking/server/routers/search.py"
+          "destination": "engine/openviking/server/routers/search.py",
+          "integration_sha256": "d509735eada76e55052a1bce1f1b0a11a9a83bf89fa79ad2f7818800497d5a64"
         },
         {
           "path": "openviking/server/routers/sessions.py",
@@ -18342,7 +18348,8 @@
         {
           "path": "openviking/service/search_service.py",
           "sha256": "b937f08edc9903fc949d49968bfaa9e58e73d6432cafbc9c60b4448d8b8dd1fd",
-          "destination": "engine/openviking/service/search_service.py"
+          "destination": "engine/openviking/service/search_service.py",
+          "integration_sha256": "3327bfedf82b3a3aeebf5ee4577f03a5c33e9678abc0ad588eb9523722c9846e"
         },
         {
           "path": "openviking/service/session_auto_commit.py",
@@ -18605,7 +18612,8 @@
         {
           "path": "openviking/session/memory/tools.py",
           "sha256": "2d7970855ef529561f7319d4a904bd76bd312d82282949fd62dc752ff6addbb2",
-          "destination": "engine/openviking/session/memory/tools.py"
+          "destination": "engine/openviking/session/memory/tools.py",
+          "integration_sha256": "67b8069551204797fa149b37d6c0eb5e264f9e74678f51d1c6fb532bd6c690bb"
         },
         {
           "path": "openviking/session/memory/utils/__init__.py",
@@ -18655,7 +18663,8 @@
         {
           "path": "openviking/session/memory/utils/memory_fields.py",
           "sha256": "0e9fc85fce8b414dfef12a67d635c49d28ed4ad07524210ba766b0f0a64404e7",
-          "destination": "engine/openviking/session/memory/utils/memory_fields.py"
+          "destination": "engine/openviking/session/memory/utils/memory_fields.py",
+          "integration_sha256": "735d35144871b984be18b25a4b9807ef726cd4707e0692547a27eee008b66253"
         },
         {
           "path": "openviking/session/memory/utils/memory_file_utils.py",
@@ -18666,7 +18675,8 @@
         {
           "path": "openviking/session/memory/utils/messages.py",
           "sha256": "e91e75560b885848aceba306c9642a7a81ecb0f45b77f45b0ea8b329ed94c2a3",
-          "destination": "engine/openviking/session/memory/utils/messages.py"
+          "destination": "engine/openviking/session/memory/utils/messages.py",
+          "integration_sha256": "02fcdbe5c5d41500a089ef67315853800fb3b17dbba0c49e9cdf15801341d81c"
         },
         {
           "path": "openviking/session/memory/utils/model.py",
@@ -19608,7 +19618,7 @@
           "path": "openviking/storage/viking_fs/_semantic.py",
           "sha256": "ee1de274901fb569141b5a4f5adaa4d5404bf83315bd8ea3917060c75843e2fe",
           "destination": "engine/openviking/storage/viking_fs/_semantic.py",
-          "integration_sha256": "df1ce11a841d277a18386c35c9dff2c314c65c7814d6d55c1231ab3ad691ff56"
+          "integration_sha256": "3b9a16a1a82b0d300f9bf71f7217d373792ac904cff3225cc42a2c278f0fb394"
         },
         {
           "path": "openviking/storage/viking_fs/_snapshot.py",
@@ -19630,12 +19640,13 @@
           "path": "openviking/storage/viking_vector_index_backend.py",
           "sha256": "ee9620db3abd2b78beaef5a00438ef673285b5e7e10fb2c65e1fbcef8cd1d613",
           "destination": "engine/openviking/storage/viking_vector_index_backend.py",
-          "integration_sha256": "34e777ace1dc809c1fc19a621e59b71d5d1f626a6f793dd1947174fc8851b8a6"
+          "integration_sha256": "34a3474517af9888007c9cb471fe9d804cb0b870049d4cf9798f29f86fecc103"
         },
         {
           "path": "openviking/storage/vikingdb_manager.py",
           "sha256": "c9d6d8c805b9f6ec7ac7fc75fae611edb0b8f42236092f7114fd8ca77b2a0df1",
-          "destination": "engine/openviking/storage/vikingdb_manager.py"
+          "destination": "engine/openviking/storage/vikingdb_manager.py",
+          "integration_sha256": "4aa1314d7bb099ae2362498245e1e8688fe381d15ec80e4c3dc7ba6535559ed1"
         },
         {
           "path": "openviking/telemetry/__init__.py",
@@ -20096,7 +20107,8 @@
         {
           "path": "openviking_cli/utils/config/open_viking_config.py",
           "sha256": "591419be608061286f90dea4a40dd8b3baa37510617108337a2de685088cc8eb",
-          "destination": "engine/openviking_cli/utils/config/open_viking_config.py"
+          "destination": "engine/openviking_cli/utils/config/open_viking_config.py",
+          "integration_sha256": "5359a903ee199a3fa402064a10e27cac81bdfba6cb0a8c7ae9d7e03167d001e3"
         },
         {
           "path": "openviking_cli/utils/config/ovcli_config.py",
@@ -23323,7 +23335,7 @@
           "path": "tests/server/test_api_search.py",
           "sha256": "94ab55aae29d3d6f6311062971c6dfadf9ac6914150d60a07da810b03f791fc2",
           "destination": "engine/tests/server/test_api_search.py",
-          "integration_sha256": "3e105276790fed95fc9dc463b49218ecdce9e3c571b67ba5553187315aeb67ef"
+          "integration_sha256": "d3cffbd2def0f4ad224a83ae8ea1fe8da310fa20c1d9b9f20207d203c824ee00"
         },
         {
           "path": "tests/server/test_api_search_context.py",
@@ -23812,7 +23824,8 @@
         {
           "path": "tests/session/memory/test_memory_timestamp_parsing.py",
           "sha256": "85243ce3f828a4022f8da06c2f1d614ca3f06b8b541fe98897dd515542f5639e",
-          "destination": "engine/tests/session/memory/test_memory_timestamp_parsing.py"
+          "destination": "engine/tests/session/memory/test_memory_timestamp_parsing.py",
+          "integration_sha256": "f40f9d1c32f3f0b4393cbc997a60cf4cf33bdf16f38a90825772d72a05fc45c4"
         },
         {
           "path": "tests/session/memory/test_memory_tools.py",
@@ -31897,6 +31910,10 @@
       "path": "engine/openviking/session/memory/utils/migration_sources.py",
       "sha256": "8e7974428703bf9c059c4375074bacd5b24bc4148548f872873cf57eb80ee528",
       "reason": "Readable legacy migration event source section"
+    },
+    {
+      "path": "engine/tests/config/test_output_language_runtime.py",
+      "sha256": "22c751165202f7b2c9af904bb72ef7f943fa94ee3f562d323e55e65c04e70d59"
     }
   ],
   "bot_removal": {

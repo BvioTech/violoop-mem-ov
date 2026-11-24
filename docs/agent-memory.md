@@ -42,7 +42,25 @@ memory({action: 'search', query: '出行偏好', keywords: ['火车'],
 - `eventsTimeDecayProtection` 在 Agent search 中默认为 `"auto"`（30 天保护期），只影响事件类记忆的语义排名。传 `null` 关闭，传 `"14d"` 等时长覆盖；不根据查询中的历史表达或日期自动切换。直接调用 HTTP 搜索接口不传参数时仍不衰减。
 - `since/until` 是原生索引记录的创建/更新时间范围，timeField 默认 updated_at；不是正文中的事件发生时间。支持带时区 ISO 时间、UTC 日期和 7d/1w 等相对时间。日期上界含当日结束；相对边界在一次请求内固定，确保各检索分支一致。
 - `level` 限制命中的 L0/L1/L2 层级，不自动加载完整文件。关键词补充也通过原生索引核对同样的时间、标签、类型与层级条件；每个层级独立核对，避免目录不同层级混淆。关键词候选最多检查 50 条，因此过滤很严格时可能少于请求数量；不会拿不符合条件的结果凑数。
-- 普通 search 默认 10 条。带关键词时，两路候选默认/最多各 10 条，limit 可以调小。按 URI 去重后交替选取，一边耗尽后继续另一边；每条预览最多 800 字符，合计最多 8000 字符，下一条放不下就停止并丢弃后续候选。不会为塞入更多条目而平均缩短预览；短结果可以超过 10 条，最多 20 条。展示仍分语义与关键词两组，预览截断有明确提示；URI、来源字段和提示另计。
+- 普通 search 默认 10 条。带关键词时，两路候选默认/最多各 10 条，limit 可以调小。按 URI 合并后最多 20 条，展示仍分语义与关键词两组。先选定候选再分配预算，不因某条预览过长而丢弃后续候选。
+- Device 通过 HTTP `budgetChars` 指定正文总预算，Memory 统一分配和截断，不再设置单条 800/600/400 字符上限。先过滤、去重、排序并确定条数，再按长度分配；短条目节省的额度分给长条目，保持排名。
+- 超额预览只保留开头，截去后部并追加 `…[truncated]`，不保留尾部。标记计入正文预算；极小预算使用单字符省略号。`truncated:true` 和独立的 `truncationNotice` 提醒按完整 URI 继续读取。处理的是索引 abstract 或关键词命中行，不额外读取原始文件。
+- 字符预算按 JavaScript UTF-16 长度计算，并避免切断代理对；不是 token 预算。标题、URI、元数据和独立的读取提示另计。
+
+| Device 场景 | 正文预算 | 结果条数 | 原生接口 |
+| --- | ---: | --- | --- |
+| 聊天自动召回 | 2500 | 最多 10 | find |
+| Agent 主动 search | 8000 | 普通默认 10，混合每路最多 10 | search |
+| Compose 补全 / 建议 / 起草（最新 Device 主线） | 2400 | 最多 4 | find |
+| 插件补全 | 1200 | 最多 4 | find |
+| Agent grep | 6000 | 默认 10 | grep |
+
+最新 Device 主线已以 Compose 替代旧 proactive2；此处保留新版最多 4 条的策略，不恢复旧入口。旧后端兼容分支的裁剪保留不变。
+
+HTTP search/recall 不传 `budgetChars` 时默认 8000（可通过 `search_max_chars` / `recall_max_chars` 覆盖），grep 默认 6000。显式预算须为 1–100000 的整数，超限返回 400。旧客户端可继续省略该参数；新版 Device 需与支持此参数的 Memory 配套发布。
+
+`POST /v1/search`、`/v2/search` 的 `mode` 默认为 `search`；显式 `mode:"find"` 使用原生 Find，但保留非空短查询，不套用聊天自动召回的 8 字符门槛。`/v2/recall` 仍走聊天自动召回规则。Find 不携带会话 ID，Search 可传 `sessionId`。这些更改不涉及 embedding、rerank、原始文件或全文读取分页。
+
 - `includeProvenance:true` 在 search 中附带原生提取来源标识（如 source_extraction_id/source_extraction_ids）、可用 MEMORY_FIELDS 时间/版本、标签及本次检索命中原因。检索 query/matchReason 不是原始对话来源。缺少来源不会伪造；属性读取失败会返回 metadataUnavailable。手动新建文件通常没有抽取来源 ID。
 - 来源元数据较长时，工具展示前 2000 字符并明确标记；`get(..., includeProvenance:true)` 可读取该文件完整的允许展示的元数据字段。正文仍按原有 next/hasMore 分页。
 

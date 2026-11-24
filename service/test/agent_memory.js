@@ -11,7 +11,7 @@ const { searchOptions } = require('../openviking_agent')
 
 const key = 'viking://user/test/memories/preferences/agent.md'
 const other = 'viking://user/test/memories/events/outside.md'
-const records = new Map(), calls = []
+const records = new Map(), projectTags = new Map(), calls = []
 let upstream, server, app, base, rejectRefresh = false, searchKey = key
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-agent-'))
 const hit = (uri, level = 2) => ({ uri, level, score: 0.9, abstract: '旅行偏好', context_type: 'memory', tags: ['memory_type=preferences', 'topic=travel'] })
@@ -21,10 +21,11 @@ before(async () => {
     const body = text ? JSON.parse(text) : undefined
     const u = new URL(req.url, 'http://native'), uri = u.searchParams.get('uri')
     calls.push({ method: req.method, path: u.pathname, params: Object.fromEntries(u.searchParams), body })
-    const send = (status, result) => { res.writeHead(status, { 'content-type':'application/json' }); res.end(JSON.stringify(status < 400 ? { status:'ok', result } : { status:'error', error:{ message: result } })) }
+    const send = (status, result, fields) => { res.writeHead(status, { 'content-type':'application/json' }); res.end(JSON.stringify(status < 400 ? { status:'ok', result, ...fields } : { status:'error', error:{ message: result } })) }
     if (u.pathname === '/api/v1/content/write') {
       if (body.mode === 'create' && records.has(body.uri)) return send(409, 'already exists')
       records.set(body.uri, body.content)
+      if (body.tags !== undefined) projectTags.set(body.uri, body.tags)
       if (rejectRefresh) return send(500, 'index refresh failed')
       return send(200, { uri: body.uri, mode: body.mode, vector_status: 'queued', overview_status:'complete' })
     }
@@ -43,10 +44,34 @@ before(async () => {
       }
       return send(200, [...entries.values()])
     }
+    if (u.pathname === '/api/v1/fs/tree') {
+      if (uri.endsWith('/missing')) return send(404, 'missing')
+      const entries = ['2026', '2026/10', '2026/10/出差 #1.md'].map((rel_path, i) => ({
+        uri: uri + '/' + rel_path, rel_path, isDir: i < 2, size: 42,
+      })).filter(entry => entry.rel_path.split('/').length <= Number(u.searchParams.get('level_limit')))
+      const offset = Number(u.searchParams.get('offset'))
+      const limit = Number(u.searchParams.get('limit'))
+      return send(200, entries.slice(offset, offset + limit), { has_more: offset + limit < entries.length })
+    }
     if (u.pathname === '/api/v1/fs' && req.method === 'DELETE') { records.delete(uri); return send(200, { uri, estimated_deleted_count:1, semantic_status:'queued' }) }
-    if (u.pathname === '/api/v1/fs/attrs') return send(200, { attrs:{ tags:['topic=travel'], memory:{ memory_type:'preferences', created_at:'2026-01-01T00:00:00Z', source_extraction_id:'source-123', content:'must not leak whole file' } } })
+    if (u.pathname === '/api/v1/fs/attrs') return send(200, { attrs:{ tags:projectTags.get(uri) || ['topic=travel'], memory:{ memory_type:'preferences', created_at:'2026-01-01T00:00:00Z', source_extraction_id:'source-123', content:'must not leak whole file' } } })
+    if (u.pathname === '/api/v1/content/set_tags') {
+      if (!records.has(body.uri)) return send(404, 'missing')
+      const current = projectTags.get(body.uri) || ['topic=travel']
+      projectTags.set(body.uri, body.mode === 'append' ? [...new Set([...current, ...body.tags])] : body.tags)
+      return send(200, { tags_updated: true })
+    }
     if (u.pathname === '/api/v1/search/grep') return send(200, { matches:[{ uri:searchKey, line:1, content:'travel evidence' }, { uri:other, line:1, content:'out of time range' }, { uri:'viking://user/test/memories/.overview.md', line:1, content:'wrong level' }] })
     if (u.pathname.startsWith('/api/v1/search/')) {
+      if (body.query === '' && (body.tags?.[0]?.startsWith('project_id=') || body.tags?.[0] === 'core=true')) {
+        const matches = [...projectTags].filter(([uri, tags]) => records.has(uri) && tags.includes(body.tags[0]))
+        const offset = body.offset ?? 0
+        const page = matches.slice(offset, offset + body.limit)
+        return send(200, { memories: page.map(([uri]) => ({ ...hit(uri), abstract: records.get(uri).split('\n')[0] })), resources: [], skills: [] })
+      }
+      if (body.filter?.op === 'must_not' && body.filter.field === 'uri' && body.filter.conds.includes(searchKey)) {
+        return send(200, { memories: [hit(other)], resources: [], skills: [] })
+      }
       if (body.query === '') return send(200, { memories:body.level === 2 ? [hit(searchKey)] : [], resources:[], skills:[] })
       return send(200, { memories:[hit(searchKey)], resources:[], skills:[], provenance:[{ query:'rewritten travel', matched_contexts:[{ uri:searchKey, tier:'L2', score:0.9, match_reason:'semantic match' }] }] })
     }
@@ -57,12 +82,57 @@ before(async () => {
   server = http.createServer(app); server.listen(0, '127.0.0.1'); await once(server, 'listening')
   base = 'http://127.0.0.1:' + server.address().port
 })
+
+
 after(async () => { app?.close(); await Promise.all([new Promise(r => server.close(r)),new Promise(r => upstream.close(r))]); fs.rmSync(dir,{recursive:true,force:true}) })
 async function request(method, route, body) {
   const res = await fetch(base + route, { method, headers:{'content-type':'application/json'}, ...(body === undefined ? {} : {body:JSON.stringify(body)}) })
   return { status:res.status, body:await res.json() }
 }
 const file = '/v1/memories/' + encodeURIComponent(key)
+test('tree defaults to user memories and makes one structure-only native request', async () => {
+  const start = calls.length
+  const response = await request('GET', '/v1/memory-tree')
+  assert.equal(response.status, 200)
+  assert.equal(response.body.depth, 3)
+  assert.equal(response.body.items.length, 3)
+  assert.equal(response.body.nextOffset, null)
+  assert.deepEqual(calls.slice(start), [{
+    method: 'GET', path: '/api/v1/fs/tree', body: undefined,
+    params: { uri: 'viking://~/memories', offset: '0', limit: '50', level_limit: '3',
+      output: 'original', include_abstract: 'false', include_overview: 'false' },
+  }])
+})
+
+test('tree preserves literal directory names and visible node pagination', async () => {
+  const prefix = 'viking://~/memories/events/出差 #100%'
+  const route = '/v1/memory-tree?' + new URLSearchParams({ prefix, depth: 3, limit: 2 })
+  const first = await request('GET', route)
+  assert.equal(first.status, 200)
+  assert.deepEqual(first.body.items.map(item => item.path), ['2026', '2026/10'])
+  assert.equal(first.body.hasMore, true)
+  assert.equal(first.body.nextOffset, 2)
+
+  const second = await request('GET', route + '&offset=' + first.body.nextOffset)
+  assert.equal(second.status, 200)
+  assert.equal(second.body.hasMore, false)
+  assert.deepEqual(second.body.items, [{
+    uri: prefix + '/2026/10/出差 #1.md', path: '2026/10/出差 #1.md', isDir: false,
+  }])
+  const shallow = await request('GET', '/v1/memory-tree?depth=1')
+  assert.deepEqual(shallow.body.items.map(item => item.path), ['2026'])
+})
+
+test('tree rejects invalid inputs before reaching native storage', async () => {
+  const start = calls.length
+  for (const query of ['prefix=projects.old', 'depth=0', 'depth=11', 'depth=1.5', 'limit=0', 'limit=201', 'offset=-1']) {
+    assert.equal((await request('GET', '/v1/memory-tree?' + query)).status, 400, query)
+  }
+  assert.equal(calls.length, start)
+  const missing = await request('GET', '/v1/memory-tree?prefix=viking://~/memories/missing')
+  assert.equal(missing.status, 404)
+})
+
 test('create calls native create, returns queued status and refuses overwrite', async () => {
   records.clear()
   let r = await request('POST','/v1/memories',{key,content:'# Preferences\nLikes trains.\nKeep this fact.',tags:['Topic=Travel']})
@@ -316,4 +386,91 @@ test('hybrid filter-only eligibility never receives a time-decay ranking argumen
   assert.equal(queries.find(c=>c.body.query==='travel').body.events_time_decay_protection,'30d')
   assert.ok(queries.some(c=>c.body.query===''))
   for(const call of queries.filter(c=>c.body.query==='')) assert.equal(Object.hasOwn(call.body,'events_time_decay_protection'),false)
+})
+
+test('project writes share a paginated catalogue with the agent and exclude only recalled URI candidates', async () => {
+  const projectId = 'prj_test'
+  const agentUri = 'viking://user/test/memories/entities/prj_test/agent.md'
+  const created = await request('POST', '/v1/memory-entries', { projectId, memoryType: 'entities',
+    category: projectId, name: 'manual', content: 'Manual project entry' })
+  assert.equal(created.status, 201)
+  assert.equal((await request('POST', '/v1/memories', {
+    key: agentUri, content: 'Agent project entry', tags: ['project_id=' + projectId],
+  })).status, 201)
+  const list = '/v1/project-memories/list'
+  const first = await request('POST', list, { projectId, offset: 0, limit: 1 })
+  assert.equal(first.status, 200)
+  assert.equal(first.body.items[0].uri, created.body.uri)
+  assert.equal(first.body.items[0].abstract, undefined)
+  assert.equal(first.body.nextOffset, 1)
+  const second = await request('POST', list, { projectId, offset: first.body.nextOffset, limit: 1, includePreview: true })
+  assert.equal(second.body.items[0].uri, agentUri)
+  assert.equal(second.body.items[0].abstract, 'Agent project entry')
+  assert.equal(second.body.nextOffset, null)
+  const change = await request('PATCH', '/v1/memories/' + encodeURIComponent(agentUri),
+    { oldText: 'Agent', newText: 'Updated', tags: ['topic=deployment'] })
+  assert.equal(change.status, 200)
+  assert.deepEqual(projectTags.get(agentUri), ['topic=deployment', 'project_id=' + projectId])
+
+  const previous = searchKey
+  searchKey = agentUri
+  try {
+    const recall = await request('POST', '/v2/recall', { text: 'project deployment details', maxEntities: 1, excludeUris: [agentUri] })
+    assert.equal(recall.body.results[0].uri, other)
+    const find = calls.findLast(c => c.path === '/api/v1/search/find')
+    assert.deepEqual(find.body.filter, { op: 'must_not', field: 'uri', conds: [agentUri], para: '-d=0' })
+    const search = await request('POST', '/v1/search', { query: 'deployment', limit: 1 })
+    assert.equal(search.body.results[0].uri, agentUri)
+  } finally { searchKey = previous }
+})
+
+test('core marking serializes its quota check and lists via empty native Find', async () => {
+  const samples = [
+    { directory: 'entities/people', firstLine: '# Entity display name' },
+    { directory: 'events/2026/11/23', firstLine: '# Summary' },
+    { directory: 'preferences/test', firstLine: '- A preference described in the body.' },
+  ]
+  const titles = new Map()
+  for (let i = 0; i < 21; i++) {
+    const { directory, firstLine } = samples[i % samples.length]
+    const title = '核心记忆.' + i
+    const uri = 'viking://user/test/memories/' + directory + '/' + title + '.md'
+    titles.set(uri, title)
+    records.set(uri, firstLine + '\nThis is the original body.')
+  }
+  const keys = [...titles.keys()]
+  projectTags.set(keys[0], ['project_id=prj_shared', 'topic=travel'])
+  const set = (key, core) => request('PATCH', '/v1/core-memories', { key, core })
+  const start = calls.length
+  const results = await Promise.all(keys.map(uri => set(uri, true)))
+  assert.equal(results.filter(result => result.status === 200).length, 20)
+  const full = results.findIndex(result => result.status === 409)
+  assert.notEqual(full, -1)
+  assert.equal(results[full].body.error.code, 'core_memory_limit')
+  assert.equal(calls.slice(start).some(call => call.path === '/api/v1/content/write'), false)
+  const existing = keys.find((_, index) => results[index].status === 200)
+  assert.equal((await set(existing, true)).status, 200)
+  const page = await request('GET', '/v1/core-memories')
+  assert.equal(page.status, 200)
+  assert.equal(page.body.maxItems, 20)
+  assert.equal(page.body.items.length, 20)
+  assert.equal(page.body.hasMore, false)
+  const find = calls.slice(start).find(call => call.path === '/api/v1/search/find').body
+  assert.deepEqual({ query: find.query, tags: find.tags, level: find.level, scope: find.target_uri[0] },
+    { query: '', tags: ['core=true'], level: 2, scope: 'viking://~/memories' })
+  assert.deepEqual(page.body.items.map(item => item.uri), page.body.items.map(item => item.uri).sort())
+  for (const item of page.body.items) assert.equal(item.title, titles.get(item.uri))
+
+  const update = await request('PATCH', '/v1/memories/' + encodeURIComponent(existing), {
+    oldText: 'original', newText: 'updated', tags: ['topic=changed'],
+  })
+  assert.equal(update.status, 200)
+  assert.ok(projectTags.get(existing).includes('core=true'))
+  assert.equal((await set(existing, false)).status, 200)
+  assert.ok(projectTags.get(existing).includes('topic=changed'))
+  if (existing === keys[0]) assert.ok(projectTags.get(existing).includes('project_id=prj_shared'))
+  assert.equal((await set(keys[full], true)).status, 200)
+  assert.equal((await request('PATCH', '/v1/memories/' + encodeURIComponent(existing), {
+    oldText: 'updated', newText: 'original', tags: ['core=true'],
+  })).status, 400)
 })

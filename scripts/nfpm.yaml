@@ -79,6 +79,8 @@ contents:
     dst: /opt/violoop-mem-ov/hybrid_search.js
   - src: ./service/retrieval_budget.js
     dst: /opt/violoop-mem-ov/retrieval_budget.js
+  - src: ./service/language_sync.js
+    dst: /opt/violoop-mem-ov/language_sync.js
   - src: ./service/openviking_runtime.js
     dst: /opt/violoop-mem-ov/openviking_runtime.js
   - src: ./service/model_gateway.js

@@ -72,7 +72,7 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
       user: env.OPENVIKING_USER || fileCfg.openviking?.user || 'default',
       actorPeer: env.OPENVIKING_ACTOR_PEER || fileCfg.openviking?.actor_peer || 'violoop',
       timeoutMs: Number(env.OPENVIKING_TIMEOUT_MS ?? fileCfg.openviking?.timeout_ms ?? 15000),
-      recallMaxChars: Number(env.OPENVIKING_RECALL_MAX_CHARS ?? fileCfg.openviking?.recall_max_chars ?? 2500),
+      recallMaxChars: Number(env.OPENVIKING_RECALL_MAX_CHARS ?? fileCfg.openviking?.recall_max_chars ?? 8000),
       searchMaxChars: Number(env.OPENVIKING_SEARCH_MAX_CHARS ?? fileCfg.openviking?.search_max_chars ?? 8000),
       abstractMaxChars: Number(env.OPENVIKING_ABSTRACT_MAX_CHARS ?? fileCfg.openviking?.abstract_max_chars ?? 600),
       readMaxChars: Number(env.OPENVIKING_READ_MAX_CHARS ?? fileCfg.openviking?.read_max_chars ?? 6000),
