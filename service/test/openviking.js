@@ -8,8 +8,9 @@ const os = require('os')
 const path = require('path')
 const { once } = require('events')
 const { spawn } = require('child_process')
-const { start } = require('../server')
+const { createApp, start } = require('../server')
 const { loadConfig } = require('../config')
+const { OpenVikingClient } = require('../openviking_client')
 const { mergeSearch } = require('../hybrid_search')
 const { boundPreviews } = require('../retrieval_budget')
 
@@ -78,6 +79,10 @@ before(async () => {
       return send(200, { status: 'ok', result: { matches, count: matches.length, files_scanned: 3 } })
     }
     if (req.url.startsWith('/api/v1/search/')) {
+      if (body.tags) return send(200, { status: 'ok', result: { memories: [
+        { ...hit, abstract: 'x'.repeat(158) + '😀😀' },
+        { ...hit, abstract: 'Second' }, { ...hit, abstract: 'Third' }, { ...hit, abstract: 'Fourth' },
+      ] } })
       const allowed = ['query', 'limit', 'read_content', 'score_threshold', 'target_uri', 'session_id', 'level', 'events_time_decay_protection']
       assert.ok(Object.keys(body).every(k => allowed.includes(k)))
       if (behavior === 'hybrid_parallel' && !hybridGrepStarted) await new Promise(resolve => { releaseHybridSearch = resolve })
@@ -136,7 +141,9 @@ before(async () => {
       return send(200, { status: 'ok', result: { added: body.messages.length } })
     }
     if (req.url.endsWith('/commit')) {
-      assert.deepEqual(body, { keep_recent_count: 0 })
+      assert.deepEqual(body, behavior === 'app_ingest' ? { keep_recent_count: 0, extraction_metadata: {
+        tags: ['source_app=macos:com.electron.lark', 'source_app_name=Lark'],
+      } } : { keep_recent_count: 0 })
       return send(200, { status: 'ok', result: { status: 'accepted', task_id: 'native-task', archive_uri: 'viking://user/test/sessions/archive_001' } })
     }
     if (req.url.startsWith('/api/v1/tasks/')) return send(200, { status: 'ok', result: { status: taskStatus, result: { memories_extracted: 1 } } })
@@ -375,6 +382,26 @@ test('grep calls native grep only, preserving regex, file scope and line evidenc
   const sidecars = await request('POST', '/v1/grep', { pattern: 'sidecars' })
   assert.deepEqual(sidecars.body.matches.map(m => m.level), [0, 1])
 })
+test('recent memory requests exact app tags and returns only bounded indexed previews', async () => {
+  const start = calls.length
+  const result = await request('POST', '/v2/memory/recent-by-app', { sourceAppId: 'macos:com.electron.lark' })
+  assert.equal(result.status, 200)
+  assert.deepEqual(result.body, { backend: 'openviking', snippets: ['x'.repeat(158) + '…', 'Second', 'Third'] })
+  assert.deepEqual(calls.slice(start).map(({ route, body }) => ({ route, body })), [{
+    route: '/api/v1/search/find', body: { query: '', target_uri: 'viking://~/memories', read_content: false,
+      level: 2, limit: 3, tags: ['source_app=macos:com.electron.lark'] },
+  }])
+  assert.equal((await request('POST', '/v2/memory/recent-by-app', { sourceAppId: 'Lark' })).status, 400)
+})
+test('ingest passes trusted app metadata as native commit tags', async () => {
+  behavior = 'app_ingest'
+  try {
+    const result = await request('POST', '/v2/ingest', { episode: { messages: [{ role: 'source', content: 'Lark evidence' }] },
+      sourceApp: { id: 'macos:com.electron.lark', name: 'Lark' } })
+    assert.equal(result.status, 202)
+    assert.equal(result.body.status, 'accepted')
+  } finally { behavior = 'ok' }
+})
 test('grep bounds total snippets and distinguishes misses, invalid patterns and upstream failures', async () => {
   const many = await request('POST', '/v1/grep', { pattern: 'many', limit: 50 })
   assert.equal(many.body.matches.length, 50)
@@ -437,7 +464,7 @@ test('recall fetches top ten across all levels and bounds each returned preview'
       assert.ok(result.body.results.every(h => h.content.length === 250 && h.truncated && h.truncationNotice))
       assert.equal(result.body.results.reduce((total, h) => total + h.content.length, 0), 2500)
       assert.ok(result.body.entities.every(e => e.observations.join('').length === 250 && e.truncated))
-      assert.equal(calls.at(-1).body.query.length, 600)
+      assert.equal(calls.at(-1).body.query, body.text)
       assert.equal(calls.at(-1).body.limit, 10)
     }
     const explicit = await request('POST', '/v2/recall', { text: '设备如何部署并检查日志', level: 2, minScore: 0.4, maxEntities: 1 })
@@ -450,6 +477,24 @@ test('recall fetches top ten across all levels and bounds each returned preview'
     assert.ok(!Object.hasOwn(calls.at(-1).body, 'level'))
     assert.ok(!Object.hasOwn(calls.at(-1).body, 'score_threshold'))
   } finally { behavior = 'ok' }
+})
+
+test('search and recall reject oversized queries before calling OpenViking', async () => {
+  const direct = '文'.repeat(1998) + '😀'
+  const start = calls.length
+  assert.equal((await request('POST', '/v2/recall', { text: ` ${direct} ` })).status, 200)
+  assert.deepEqual(calls.slice(start).map(call => [call.route, call.body.query]), [['/api/v1/search/find', direct]])
+  const afterSearch = calls.length
+  for (const [route, field] of [['/v1/search', 'query'], ['/v2/search', 'query'], ['/v2/recall', 'text']]) {
+    for (const text of [direct + '终', '长'.repeat(6001)]) {
+      const result = await request('POST', route, { [field]: text })
+      assert.equal(result.status, 422)
+      assert.equal(result.body.error.code, 'query_too_long')
+      assert.equal(result.body.error.maxChars, 2000)
+      assert.equal(result.body.error.actualChars, text.length)
+    }
+  }
+  assert.equal(calls.length, afterSearch)
 })
 
 const parent = uri.slice(0, uri.lastIndexOf('/'))

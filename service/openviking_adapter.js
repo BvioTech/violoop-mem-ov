@@ -8,6 +8,8 @@ const { PREVIEW_CHARS, boundPreviews } = require('./retrieval_budget')
 const { searchOptions, createMutations, enrich, metadata, levelOf, canonical } = require('./openviking_agent')
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024
+// Keep in sync with Compose's query limit.
+const MAX_QUERY_CHARS = 2000
 const TRIVIAL_RE = /^(continue|go on|next|ok(ay)?|yep|yes|no|sure|done|thx|thanks?|嗯+|哦+|好+的?|继续|行|对|是的?|可以|没事了?|不用了?|算了)[\s.!~。！？]*$/i
 const fail = (code, message, status = 400) => Object.assign(new Error(message), { code, status })
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -19,7 +21,12 @@ function integer(value, fallback, max = 50) {
 }
 function query(value, name = 'query') {
   if (typeof value !== 'string' || !value.trim()) throw fail('invalid_query', `${name} must be a non-empty string`)
-  return value.trim().slice(0, 6000)
+  const text = value.trim()
+  if (text.length > MAX_QUERY_CHARS) {
+    throw Object.assign(fail('query_too_long', `${name} exceeds ${MAX_QUERY_CHARS} UTF-16 units`, 422),
+      { maxChars: MAX_QUERY_CHARS, actualChars: text.length })
+  }
+  return text
 }
 function uri(value) {
   validateVikingUri(value)
@@ -127,6 +134,16 @@ function episodeMessages(body) {
   return messages
 }
 
+function sourceAppTags(source) {
+  if (source === undefined) return []
+  if (typeof source?.id !== 'string' || !/^(macos|windows|linux):[^:=\s\p{Cc}]{1,200}$/u.test(source.id) ||
+      (source.name !== undefined && (typeof source.name !== 'string' || !source.name.trim() ||
+        source.name.length > 200 || /[=\p{Cc}]/u.test(source.name)))) {
+    throw fail('invalid_input', 'Invalid native application source')
+  }
+  return ['source_app=' + source.id, ...(source.name ? ['source_app_name=' + source.name.trim()] : [])]
+}
+
 class IngestJournal {
   constructor(client, dataDir, onTerminal) {
     this.client = client
@@ -161,13 +178,14 @@ class IngestJournal {
   }
   async ingest(body) {
     const messages = episodeMessages(body)
+    const tags = sourceAppTags(body.sourceApp)
     const id = hash(this.client.scope + '\n' + stable(body))
     if (this.pending.has(id)) return this.pending.get(id)
-    const promise = this.submit(id, body, messages)
+    const promise = this.submit(id, body, messages, tags)
     this.pending.set(id, promise)
     try { return await promise } finally { this.pending.delete(id) }
   }
-  async submit(id, body, messages) {
+  async submit(id, body, messages, tags) {
     let record = this.read(id)
     if (record?.result) { if (!record.terminal) this.watch(id); return { ...record.result, duplicate: true } }
     if (record && ['batch_started', 'commit_started'].includes(record.phase)) {
@@ -191,7 +209,7 @@ class IngestJournal {
       }
       record.phase = 'commit_started'
       this.save(record)
-      const commit = await this.client.commit(record.sessionId)
+      const commit = await this.client.commit(record.sessionId, tags)
       if (!commit || typeof commit.task_id !== 'string') throw fail('upstream_error', 'OpenViking commit did not return a task_id; inspect native session before retry', 502)
       record.phase = 'accepted'
       record.result = {
@@ -362,6 +380,18 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
       throw e
     }
   }
+  async function recentByApp(body) {
+    const tags = sourceAppTags({ id: body?.sourceAppId })
+    // TabTab needs only recent app context. A filter-only find reads indexed
+    // previews and avoids both embedding the request and scanning memory files.
+    const result = await nativeRetrieve('', { mode: 'recall', targetUri: 'viking://~/memories',
+      tags, level: 2, limit: 3 })
+    if (!Array.isArray(result?.memories)) throw fail('upstream_error', 'invalid native find response', 502)
+    const snippets = result.memories.slice(0, 3)
+      .map(hit => typeof hit?.abstract === 'string' ? hit.abstract.trim() : '').filter(Boolean)
+      .map(text => text.length <= 160 ? text : text.slice(0, 159).replace(/[\uD800-\uDBFF]$/, '').trimEnd() + '…')
+    return { backend: 'openviking', snippets }
+  }
   const json = (res, status, value) => {
     const body = JSON.stringify(value)
     res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) })
@@ -372,7 +402,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     const pattern = keywordsPattern(body.keywords)
     const options = searchOptions(body, client, { automatic: mode === 'recall' })
     if (mode === 'recall' && pattern) throw fail('invalid_query', 'keywords are only supported by search')
-    let q = query(body.query)
+    const q = query(body.query)
     const requested = integer(requestedLimit ?? body.limit, 10)
     const limit = mode === 'recall' || pattern ? Math.min(requested, 10) : requested
     // No default score floor. Explicit caller thresholds remain wire-compatible.
@@ -385,10 +415,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     if (targetUri !== undefined) validateVikingUri(targetUri)
     if (body.sessionId !== undefined && typeof body.sessionId !== 'string') throw fail('invalid_query', 'sessionId must be a string')
     if (!limit) return []
-    if (mode === 'recall') {
-      q = q.slice(0, 600)
-      if (q.length < 8 || TRIVIAL_RE.test(q)) return []
-    }
+    if (mode === 'recall' && (q.length < 8 || TRIVIAL_RE.test(q))) return []
     const level = body.level === undefined ? undefined : integer(body.level, 0, 2)
     if (pattern) {
       // Both branches use the same explicit scope. With keywords, the default
@@ -583,6 +610,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
         catch (e) { throw fail('migration_unavailable', e.message, 503) }
       }
       if (req.method === 'POST' && p === '/v2/ingests/lookup') return json(res, 200, await journal.lookup(await readJson(req)))
+      if (req.method === 'POST' && p === '/v2/memory/recent-by-app') return json(res, 200, await recentByApp(await readJson(req)))
       if (req.method === 'POST' && p === '/v1/grep') return json(res, 200, await grepMemory(await readJson(req)))
       if (req.method === 'POST' && ['/v1/search', '/v2/search', '/v2/recall', '/v2/ingest'].includes(p)) {
         const body = await readJson(req)
@@ -593,7 +621,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
           return json(res, 202, await journal.ingest(body))
         }
         if (p === '/v2/recall') {
-          const text = query(body.text, 'text').slice(0, 600)
+          const text = query(body.text, 'text')
           const maxEntities = integer(body.maxEntities, 10)
           integer(body.maxRelations, 5)
           if (text.length < 8 || TRIVIAL_RE.test(text)) return json(res, 200, { backend: 'openviking', results: [], entities: [], relations: [] })
@@ -611,9 +639,11 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
       }
       throw fail('not_found', `no route for ${req.method} ${p}`, 404)
     } catch (err) {
+      if (res.destroyed) return
       if (req.method === 'GET' && err.upstreamStatus === 404) return json(res, 404, { error: { code: 'not_found', message: 'Memory URI not found' } })
       if (!err.status) console.error('[violoop-mem-ov] adapter error:', err.message)
-      return json(res, err.status || 500, { error: { code: err.code || 'internal', message: err.status ? err.message : 'internal error' } })
+      return json(res, err.status || 500, { error: { code: err.code || 'internal', message: err.status ? err.message : 'internal error',
+        ...(err.code === 'query_too_long' ? { maxChars: err.maxChars, actualChars: err.actualChars } : {}) } })
     }
   }
   app.setPaused = paused => migration.setPaused(paused)

@@ -2047,6 +2047,8 @@ class VikingVectorIndexBackend:
             limit=limit,
             offset=offset,
             output_fields=RETRIEVAL_OUTPUT_FIELDS,
+            order_by="updated_at",
+            order_desc=True,
             ctx=ctx,
         )
 

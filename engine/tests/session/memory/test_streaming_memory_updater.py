@@ -31,6 +31,7 @@ from openviking.session.memory.streaming_memory_updater import (
     StreamingMemoryUpdater,
     StreamingMemoryUpdaterConfig,
     StreamingMemoryUpdateResult,
+    _inherit_source_metadata_to_merged_operations,
     acquire_memory_operation_lease,
     classify_memory_merge_mode,
     enforce_merge_group_peer_id,
@@ -855,6 +856,21 @@ async def test_merge_requests_skips_patch_merge_for_same_session(monkeypatch):
     merge_mock.assert_not_awaited()
     assert len(merged.upsert_operations) == 4
     assert len(merged.delete_file_contents) == 2
+
+
+def test_patch_merge_restores_tags_only_for_attributable_operations():
+    first = _note_op_with_source("first", "extract-a")
+    second = _note_op_with_source("second", "extract-b")
+    first.search_tags = ["source_app=macos:example.first", "source_app_name=editor"]
+    second.search_tags = ["source_app=windows:example", "source_app_name=editor"]
+    exact = _note_op("first")
+    ambiguous = _note_op("summary")
+    ambiguous.search_tags = first.search_tags
+
+    _inherit_source_metadata_to_merged_operations([first, second], [exact, ambiguous])
+
+    assert exact.search_tags == first.search_tags
+    assert ambiguous.search_tags is None
 
 
 @pytest.mark.asyncio

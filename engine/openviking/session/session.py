@@ -1250,6 +1250,7 @@ class Session:
         record_auto_commit_success: bool = False,
         event_tags: Optional[List[str]] = None,
         reset_context: bool = False,
+        memory_tags: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Archive immediately and enqueue restart-safe Phase 2 processing.
 
@@ -1377,6 +1378,9 @@ class Session:
                 # legacy sessions may not have metadata yet.
                 pass
 
+            from openviking.utils.tags import normalize_search_tags
+
+            effective_memory_tags = normalize_search_tags(memory_tags)
             effective_event_tags = _resolve_event_search_tags(
                 event_tags, self._meta.event_search_tags
             )
@@ -1526,6 +1530,7 @@ class Session:
                 memory_policy=effective_memory_policy,
                 record_auto_commit_success=record_auto_commit_success,
                 event_search_tags=list(effective_event_tags),
+                memory_search_tags=effective_memory_tags,
                 auto_commit_policy=dict(self._meta.auto_commit_policy or {}),
             )
             phase1_stage = "phase1_persist"
@@ -1829,6 +1834,7 @@ class Session:
             user_config_error=user_config_error,
             record_auto_commit_success=msg.record_auto_commit_success,
             event_search_tags=list(msg.event_search_tags or []),
+            memory_search_tags=msg.memory_search_tags,
             auto_commit_policy=msg.auto_commit_policy,
         )
         return True
@@ -1959,6 +1965,7 @@ class Session:
         record_auto_commit_success: bool = False,
         event_search_tags: Optional[List[str]] = None,
         auto_commit_policy: Optional[Dict[str, Any]] = None,
+        memory_search_tags: Optional[List[str]] = None,
     ) -> None:
         """Phase 2: Extract memories and enqueue semantic work in the background."""
         from openviking.service.task_tracker import get_task_tracker
@@ -2227,6 +2234,7 @@ class Session:
                                     peer_memory_enabled=peer_memory_enabled,
                                     allowed_peer_ids=allowed_peer_ids,
                                     event_search_tags=event_search_tags,
+                                    memory_search_tags=memory_search_tags,
                                 )
 
                             if extraction_batch_limits.enabled:

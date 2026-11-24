@@ -1,7 +1,13 @@
 # Copyright (c) 2026 Beijing Volcano Engine Technology Co., Ltd.
 # SPDX-License-Identifier: AGPL-3.0
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import httpx
+
+from openviking.session.memory.dataclass import ResolvedOperation, ResolvedOperations
+from tests.server.test_api_sessions import _wait_for_task
 
 
 def _event_tags(response: httpx.Response) -> list[str]:
@@ -126,3 +132,46 @@ async def test_commit_duplicate_event_tag_keys_keep_last_value(client: httpx.Asy
     )
 
     assert response.status_code == 200
+
+
+async def test_commit_indexes_app_tags_on_an_entity(client, service, monkeypatch):
+    def orchestrator(**kwargs):
+        user = kwargs["ctx"].user.user_space_name()
+        operation = ResolvedOperation(
+            memory_type="entities",
+            uris=[f"viking://user/{user}/memories/entities/products/example.md"],
+            memory_fields={
+                "category": "products",
+                "name": "example",
+                "content": "Example is a document editor.",
+            },
+        )
+        return SimpleNamespace(run=AsyncMock(return_value=(
+            ResolvedOperations(upsert_operations=[operation], delete_file_contents=[], errors=[]),
+            [],
+        )))
+
+    monkeypatch.setattr(service.sessions._session_compressor, "_get_or_create_react", orchestrator)
+    created = await client.post("/api/v1/sessions", json={"memory_policy": {"memory_types": ["entities"]}})
+    assert created.status_code == 200, created.text
+    session = created.json()["result"]["session_id"]
+    await client.post(
+        f"/api/v1/sessions/{session}/messages",
+        json={"role": "user", "content": "Example is a document editor."},
+    )
+    tags = ["source_app=macos:com.example.editor", "source_app_name=Example Editor"]
+    response = await client.post(
+        f"/api/v1/sessions/{session}/commit",
+        json={"extraction_metadata": {"tags": tags}},
+    )
+    assert response.status_code == 200, response.text
+    task = await _wait_for_task(client, response.json()["result"]["task_id"], timeout=20)
+    assert task["status"] == "completed", task
+    found = await client.post(
+        "/api/v1/search/find",
+        json={"target_uri": "viking://~/memories", "level": 2, "tags": [tags[0]]},
+    )
+    assert found.status_code == 200, found.text
+    memories = found.json()["result"]["memories"]
+    assert len(memories) == 1
+    assert set(memories[0]["tags"]) == {"memory_type=entities", tags[0], tags[1].lower()}
