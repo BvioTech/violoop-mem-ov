@@ -2048,7 +2048,8 @@ class VikingVectorIndexBackend:
             limit=limit,
             offset=offset,
             output_fields=RETRIEVAL_OUTPUT_FIELDS,
-            **({"order_by": order_by} if order_by is not None else {}),
+            order_by=order_by or "updated_at",
+            order_desc=order_by is None,
             ctx=ctx,
         )
 

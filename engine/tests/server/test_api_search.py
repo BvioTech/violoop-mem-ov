@@ -58,6 +58,43 @@ async def test_find_basic(client_with_resource):
     assert "telemetry" not in body
 
 
+async def test_filter_only_find_sorts_app_memories_before_limiting(client, service, monkeypatch):
+    ctx = RequestContext(user=UserIdentifier.the_default_user("test_user"), role=Role.ROOT)
+    parent = "viking://user/test_user/memories/entities"
+    await service.fs.mkdir(parent, ctx=ctx)
+    tag = "source_app=macos:com.electron.lark"
+    for day, app in [(1, tag), (4, tag), (2, tag), (5, "source_app=windows:lark"), (3, tag)]:
+        await service.vikingdb_manager.upsert(
+            {
+                "uri": f"{parent}/{day}.md",
+                "parent_uri": parent,
+                "abstract": f"Day {day}",
+                "context_type": "memory",
+                "updated_at": f"2026-11-0{day}T00:00:00Z",
+                "search_tags": [app],
+                "account_id": ctx.account_id,
+                "owner_space": ctx.user.user_space_name(),
+                "level": 2,
+                "vector": [0.1] * service.vikingdb_manager.vector_dim,
+            },
+            ctx=ctx,
+        )
+
+    def unexpected_embedding(*args, **kwargs):
+        pytest.fail("filter-only lookup must not access the query embedder")
+
+    monkeypatch.setattr(service.viking_fs, "_get_embedder", unexpected_embedding)
+    response = await client.post(
+        "/api/v1/search/find",
+        headers={"X-OpenViking-User": ctx.user.user_id},
+        json={"target_uri": "viking://~/memories", "tags": [tag], "level": 2, "limit": 3},
+    )
+    assert response.status_code == 200, response.text
+    assert [item["abstract"] for item in response.json()["result"]["memories"]] == [
+        "Day 4", "Day 3", "Day 2",
+    ]
+
+
 async def test_search_forwards_keywords_search_type(
     client: httpx.AsyncClient, service, monkeypatch
 ):

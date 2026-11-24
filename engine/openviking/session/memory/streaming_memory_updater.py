@@ -1352,11 +1352,15 @@ def _inherit_source_metadata_to_merged_operations(
         return
 
     for merged_op in merged_operations or []:
-        if _operation_source_extraction_ids(merged_op):
-            continue
         matched_inputs: list[ResolvedOperation] = []
         for uri in list(getattr(merged_op, "uris", []) or []):
             matched_inputs.extend(input_by_uri.get(uri, []))
+        # The model does not own caller tags. Restore them only when the
+        # contributing input operations agree, including their application.
+        tag_sets = {tuple(op.search_tags or ()) for op in matched_inputs or input_operations}
+        merged_op.search_tags = list(next(iter(tag_sets))) if len(tag_sets) == 1 else None
+        if _operation_source_extraction_ids(merged_op):
+            continue
         matched_ids = {
             source_id
             for input_op in matched_inputs

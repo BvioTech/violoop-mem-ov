@@ -142,9 +142,11 @@ def test_factory_ignores_deprecated_memory_version(empty_viking_fs):
 
 
 def test_extract_long_term_memories_preserves_legacy_positional_parameter_order():
-    parameter_names = list(
-        inspect.signature(SessionCompressorV3.extract_long_term_memories).parameters
-    )
+    parameter_names = [
+        parameter.name
+        for parameter in inspect.signature(SessionCompressorV3.extract_long_term_memories).parameters.values()
+        if parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    ]
 
     assert parameter_names[-4:] == [
         "allow_self_memory",
@@ -876,10 +878,15 @@ async def test_v3_extract_uses_patch_merge_without_directory_lock(monkeypatch, e
         allowed_memory_types={"cases", "profile", "trajectories", "experiences"},
         agent_evolution_enabled=True,
         strict_extract_errors=True,
+        memory_search_tags=["source_app=macos:example.editor", "source_app_name=editor"],
     )
 
     assert len(applied_operations) == 1
     assert applied_operations[0].upsert_operations[0].memory_type == "cases"
+    assert applied_operations[0].upsert_operations[0].search_tags == [
+        "source_app=macos:example.editor",
+        "source_app_name=editor",
+    ]
     assert [case.name for case in trained_cases] == ["重复预订处理"]
     assert contexts[0].uri.endswith("重复预订处理.md")
 

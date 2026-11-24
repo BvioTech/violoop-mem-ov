@@ -350,9 +350,9 @@ class _SemanticMixin:
         limits therefore stay identical between the two. Hand-building the
         filter here would be one refactor away from silently losing them.
 
-        Records come back in whatever order the store yields; there is no
-        similarity ranking, so ``score`` stays 0 rather than a fabricated value
-        callers might try to sort on.
+        Records are ordered by most recent update by default. Offset-based
+        pagination orders by creation time so edits cannot move an item
+        between pages. There is no similarity ranking, so ``score`` stays 0.
         """
         from openviking.storage.vikingdb_manager import VikingDBManagerProxy
         from openviking_cli.retrieve import ContextType, FindResult

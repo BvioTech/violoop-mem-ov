@@ -379,6 +379,7 @@ class SessionService:
         min_raw_tail_steps: Optional[int] = None,
         event_tags: Optional[List[str]] = None,
         reset_context: bool = False,
+        memory_tags: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Commit a session (archive messages and extract memories).
 
@@ -402,6 +403,7 @@ class SessionService:
             min_raw_tail_steps=min_raw_tail_steps,
             event_tags=event_tags,
             reset_context=reset_context,
+            memory_tags=memory_tags,
         )
 
     async def commit_async(
@@ -417,6 +419,7 @@ class SessionService:
         min_raw_tail_steps: Optional[int] = None,
         event_tags: Optional[List[str]] = None,
         reset_context: bool = False,
+        memory_tags: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Async commit a session.
 
@@ -447,6 +450,8 @@ class SessionService:
         )
         if event_tags is not None:
             commit_kwargs["event_tags"] = event_tags
+        if memory_tags:
+            commit_kwargs["memory_tags"] = memory_tags
         if reset_context:
             commit_kwargs["reset_context"] = True
         result = await session.commit_async(**commit_kwargs)

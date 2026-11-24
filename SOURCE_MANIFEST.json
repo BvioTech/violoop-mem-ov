@@ -18161,7 +18161,8 @@
         {
           "path": "openviking/server/routers/sessions.py",
           "sha256": "f057987a42944e9b789a38bb7599d857afe1dede12434ca26f4210a6c6af4b20",
-          "destination": "engine/openviking/server/routers/sessions.py"
+          "destination": "engine/openviking/server/routers/sessions.py",
+          "integration_sha256": "a1fb9ee00bc8ac51db990e56e9d9ecbe61e62742c0d3caca58324eb5cb635352"
         },
         {
           "path": "openviking/server/routers/skills.py",
@@ -18358,7 +18359,8 @@
         {
           "path": "openviking/service/session_service.py",
           "sha256": "6027388c0937becff017c79e56125e057c0dec70ce4cf5614d3e6e6846fd30f3",
-          "destination": "engine/openviking/service/session_service.py"
+          "destination": "engine/openviking/service/session_service.py",
+          "integration_sha256": "07ab8b2565efe4aa4a33898ef039611cd733861067415819e0ac5bf1a7e93b4b"
         },
         {
           "path": "openviking/service/skill_sources.py",
@@ -18428,7 +18430,8 @@
         {
           "path": "openviking/session/compressor_v3.py",
           "sha256": "ed924d86cfdb140e1c06d6dcdbd0950d9e327b9deb89f113b1efa77e940754e6",
-          "destination": "engine/openviking/session/compressor_v3.py"
+          "destination": "engine/openviking/session/compressor_v3.py",
+          "integration_sha256": "7da3d04b3cc09b7419a9681d0fc5055c1d5f9cb5b7887b09a8c499548b695680"
         },
         {
           "path": "openviking/session/extraction_batch.py",
@@ -18604,7 +18607,7 @@
           "path": "openviking/session/memory/streaming_memory_updater.py",
           "sha256": "66d29806f25c6b59da6ee2f035caad439cc3ea012d9bae75454e73173bf6290e",
           "destination": "engine/openviking/session/memory/streaming_memory_updater.py",
-          "integration_sha256": "c36afc1f68da1bb0fc6d7bc59352392c0d7b0b20938be707a4ac44bf11fa760f"
+          "integration_sha256": "5465eefe82e4af1bf5a0513e1376a232acf76ed4fdef4176af859156a7ebe0e2"
         },
         {
           "path": "openviking/session/memory/tools.py",
@@ -18718,7 +18721,8 @@
         {
           "path": "openviking/session/session.py",
           "sha256": "2e7072b7a4fd0e51a0d4bb4abcd1b4f6eb5d5633fd099ea3f4ec8d3761590a59",
-          "destination": "engine/openviking/session/session.py"
+          "destination": "engine/openviking/session/session.py",
+          "integration_sha256": "6d888c141bf2d3ebd8b91657e059e5a89e04c39c2fb508c0e233fdd51131a397"
         },
         {
           "path": "openviking/session/skill/__init__.py",
@@ -19157,7 +19161,8 @@
         {
           "path": "openviking/storage/queuefs/session_commit_msg.py",
           "sha256": "586abb4d3ffe10a01936d120c0ebbdc7a97724725cc96b1f55ec5a4fce385108",
-          "destination": "engine/openviking/storage/queuefs/session_commit_msg.py"
+          "destination": "engine/openviking/storage/queuefs/session_commit_msg.py",
+          "integration_sha256": "c6c8cdd25387ff7f964514c4651c2707e38d86fb7bfd7b1bb3c8380aa0f49ac7"
         },
         {
           "path": "openviking/storage/queuefs/session_commit_processor.py",
@@ -19613,7 +19618,7 @@
           "path": "openviking/storage/viking_fs/_semantic.py",
           "sha256": "ee1de274901fb569141b5a4f5adaa4d5404bf83315bd8ea3917060c75843e2fe",
           "destination": "engine/openviking/storage/viking_fs/_semantic.py",
-          "integration_sha256": "0e940c14d71b2fb4a85fd4725366377441defd25bdf35cafc6fe94b1b0e87904"
+          "integration_sha256": "3b9a16a1a82b0d300f9bf71f7217d373792ac904cff3225cc42a2c278f0fb394"
         },
         {
           "path": "openviking/storage/viking_fs/_snapshot.py",
@@ -19635,7 +19640,7 @@
           "path": "openviking/storage/viking_vector_index_backend.py",
           "sha256": "ee9620db3abd2b78beaef5a00438ef673285b5e7e10fb2c65e1fbcef8cd1d613",
           "destination": "engine/openviking/storage/viking_vector_index_backend.py",
-          "integration_sha256": "a7d9ba68bfda0e9a61f7c38f97931ac44f67cea71716652e2c39ac5986193d6a"
+          "integration_sha256": "34a3474517af9888007c9cb471fe9d804cb0b870049d4cf9798f29f86fecc103"
         },
         {
           "path": "openviking/storage/vikingdb_manager.py",
@@ -23330,7 +23335,7 @@
           "path": "tests/server/test_api_search.py",
           "sha256": "94ab55aae29d3d6f6311062971c6dfadf9ac6914150d60a07da810b03f791fc2",
           "destination": "engine/tests/server/test_api_search.py",
-          "integration_sha256": "12342e428e3d829c9a91e6c7e271ad3fe0ac7227db1a264206aef1670baf3847"
+          "integration_sha256": "d3cffbd2def0f4ad224a83ae8ea1fe8da310fa20c1d9b9f20207d203c824ee00"
         },
         {
           "path": "tests/server/test_api_search_context.py",
@@ -23352,7 +23357,8 @@
         {
           "path": "tests/server/test_api_sessions_event_tags.py",
           "sha256": "68f0f568c49063047e661f24d3624f177da5c2c8379899e5752bfdb175321738",
-          "destination": "engine/tests/server/test_api_sessions_event_tags.py"
+          "destination": "engine/tests/server/test_api_sessions_event_tags.py",
+          "integration_sha256": "04a39491d3465e4b24823a736b0f38955aa6a722f03b46b2ff747a7e70a6b4d6"
         },
         {
           "path": "tests/server/test_api_skills.py",
@@ -23864,7 +23870,8 @@
         {
           "path": "tests/session/memory/test_streaming_memory_updater.py",
           "sha256": "1148e4f56ee23f1ed20b79dc35f4ce74e7eb23ca12ce348847ced23fb0939c04",
-          "destination": "engine/tests/session/memory/test_streaming_memory_updater.py"
+          "destination": "engine/tests/session/memory/test_streaming_memory_updater.py",
+          "integration_sha256": "fcea884bbbe3c5db8168ad10432c9d662103c5732cdb41941d8374a2165fb15c"
         },
         {
           "path": "tests/session/memory/test_template_utils.py",
@@ -23880,7 +23887,7 @@
           "path": "tests/session/test_compressor_v3.py",
           "sha256": "2818d6be1e4c5e15b51007271adefcbd1c9ced276d64348246e78e40bf9bb6ce",
           "destination": "engine/tests/session/test_compressor_v3.py",
-          "integration_sha256": "3e1f8c6874a7a75a6e87c19e4f661ec06c5f6a835b5d9491ff9047ac6fb0bec8"
+          "integration_sha256": "c404cdece7f416887d0ad53c0f03555a863f05d2b559b0fc0f64d3b6c1c79d46"
         },
         {
           "path": "tests/session/test_graph_completion.py",

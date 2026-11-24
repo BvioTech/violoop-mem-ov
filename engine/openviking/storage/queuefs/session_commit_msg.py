@@ -20,6 +20,7 @@ class SessionCommitMsg:
     # Resolved custom scalar tags to attach to event memories extracted in this
     # commit. Already normalized by the producer; empty means "no tags".
     event_search_tags: List[str] = field(default_factory=list)
+    memory_search_tags: List[str] = field(default_factory=list)
     auto_commit_policy: Dict[str, Any] = field(default_factory=dict)
     # Version 1 snapshots explicitly encode WM. Version 0 (before default-off)
     # omitted true; only queued work, never saved user intent, inherits that value.
