@@ -79,6 +79,10 @@ before(async () => {
       return send(200, { status: 'ok', result: { matches, count: matches.length, files_scanned: 3 } })
     }
     if (req.url.startsWith('/api/v1/search/')) {
+      if (body.tags) return send(200, { status: 'ok', result: { memories: [
+        { ...hit, abstract: 'x'.repeat(158) + '😀😀' },
+        { ...hit, abstract: 'Second' }, { ...hit, abstract: 'Third' }, { ...hit, abstract: 'Fourth' },
+      ] } })
       const allowed = ['query', 'limit', 'read_content', 'score_threshold', 'target_uri', 'session_id', 'level', 'events_time_decay_protection']
       assert.ok(Object.keys(body).every(k => allowed.includes(k)))
       if (behavior === 'hybrid_parallel' && !hybridGrepStarted) await new Promise(resolve => { releaseHybridSearch = resolve })
@@ -137,7 +141,9 @@ before(async () => {
       return send(200, { status: 'ok', result: { added: body.messages.length } })
     }
     if (req.url.endsWith('/commit')) {
-      assert.deepEqual(body, { keep_recent_count: 0 })
+      assert.deepEqual(body, behavior === 'app_ingest' ? { keep_recent_count: 0, extraction_metadata: {
+        tags: ['source_app=macos:com.electron.lark', 'source_app_name=Lark'],
+      } } : { keep_recent_count: 0 })
       return send(200, { status: 'ok', result: { status: 'accepted', task_id: 'native-task', archive_uri: 'viking://user/test/sessions/archive_001' } })
     }
     if (req.url.startsWith('/api/v1/tasks/')) return send(200, { status: 'ok', result: { status: taskStatus, result: { memories_extracted: 1 } } })
@@ -376,13 +382,25 @@ test('grep calls native grep only, preserving regex, file scope and line evidenc
   const sidecars = await request('POST', '/v1/grep', { pattern: 'sidecars' })
   assert.deepEqual(sidecars.body.matches.map(m => m.level), [0, 1])
 })
-test('grep can include file update metadata without invoking semantic search', async () => {
+test('recent memory requests exact app tags and returns only bounded indexed previews', async () => {
   const start = calls.length
-  const result = await request('POST', '/v1/grep', { pattern: '海拉尔', includeUpdatedAt: true })
+  const result = await request('POST', '/v2/memory/recent-by-app', { sourceAppId: 'macos:com.electron.lark' })
   assert.equal(result.status, 200)
-  assert.ok(result.body.matches.every(match => match.updatedAt === '2026-10-10T01:00:00Z'))
-  assert.deepEqual(calls.slice(start).map(call => call.route.split('?')[0]), ['/api/v1/search/grep', '/api/v1/fs/stat'])
-  assert.equal((await request('POST', '/v1/grep', { pattern: '海拉尔', includeUpdatedAt: 'yes' })).status, 400)
+  assert.deepEqual(result.body, { backend: 'openviking', snippets: ['x'.repeat(158) + '…', 'Second', 'Third'] })
+  assert.deepEqual(calls.slice(start).map(({ route, body }) => ({ route, body })), [{
+    route: '/api/v1/search/find', body: { query: '', target_uri: 'viking://~/memories', read_content: false,
+      level: 2, limit: 3, tags: ['source_app=macos:com.electron.lark'] },
+  }])
+  assert.equal((await request('POST', '/v2/memory/recent-by-app', { sourceAppId: 'Lark' })).status, 400)
+})
+test('ingest passes trusted app metadata as native commit tags', async () => {
+  behavior = 'app_ingest'
+  try {
+    const result = await request('POST', '/v2/ingest', { episode: { messages: [{ role: 'source', content: 'Lark evidence' }] },
+      sourceApp: { id: 'macos:com.electron.lark', name: 'Lark' } })
+    assert.equal(result.status, 202)
+    assert.equal(result.body.status, 'accepted')
+  } finally { behavior = 'ok' }
 })
 test('grep bounds total snippets and distinguishes misses, invalid patterns and upstream failures', async () => {
   const many = await request('POST', '/v1/grep', { pattern: 'many', limit: 50 })

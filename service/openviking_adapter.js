@@ -134,6 +134,16 @@ function episodeMessages(body) {
   return messages
 }
 
+function sourceAppTags(source) {
+  if (source === undefined) return []
+  if (typeof source?.id !== 'string' || !/^(macos|windows|linux):[^:=\s\p{Cc}]{1,200}$/u.test(source.id) ||
+      (source.name !== undefined && (typeof source.name !== 'string' || !source.name.trim() ||
+        source.name.length > 200 || /[=\p{Cc}]/u.test(source.name)))) {
+    throw fail('invalid_input', 'Invalid native application source')
+  }
+  return ['source_app=' + source.id, ...(source.name ? ['source_app_name=' + source.name.trim()] : [])]
+}
+
 class IngestJournal {
   constructor(client, dataDir, onTerminal) {
     this.client = client
@@ -168,13 +178,14 @@ class IngestJournal {
   }
   async ingest(body) {
     const messages = episodeMessages(body)
+    const tags = sourceAppTags(body.sourceApp)
     const id = hash(this.client.scope + '\n' + stable(body))
     if (this.pending.has(id)) return this.pending.get(id)
-    const promise = this.submit(id, body, messages)
+    const promise = this.submit(id, body, messages, tags)
     this.pending.set(id, promise)
     try { return await promise } finally { this.pending.delete(id) }
   }
-  async submit(id, body, messages) {
+  async submit(id, body, messages, tags) {
     let record = this.read(id)
     if (record?.result) { if (!record.terminal) this.watch(id); return { ...record.result, duplicate: true } }
     if (record && ['batch_started', 'commit_started'].includes(record.phase)) {
@@ -198,7 +209,7 @@ class IngestJournal {
       }
       record.phase = 'commit_started'
       this.save(record)
-      const commit = await this.client.commit(record.sessionId)
+      const commit = await this.client.commit(record.sessionId, tags)
       if (!commit || typeof commit.task_id !== 'string') throw fail('upstream_error', 'OpenViking commit did not return a task_id; inspect native session before retry', 502)
       record.phase = 'accepted'
       record.result = {
@@ -369,6 +380,18 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
       throw e
     }
   }
+  async function recentByApp(body) {
+    const tags = sourceAppTags({ id: body?.sourceAppId })
+    // TabTab needs only recent app context. A filter-only find reads indexed
+    // previews and avoids both embedding the request and scanning memory files.
+    const result = await nativeRetrieve('', { mode: 'recall', targetUri: 'viking://~/memories',
+      tags, level: 2, limit: 3 })
+    if (!Array.isArray(result?.memories)) throw fail('upstream_error', 'invalid native find response', 502)
+    const snippets = result.memories.slice(0, 3)
+      .map(hit => typeof hit?.abstract === 'string' ? hit.abstract.trim() : '').filter(Boolean)
+      .map(text => text.length <= 160 ? text : text.slice(0, 159).replace(/[\uD800-\uDBFF]$/, '').trimEnd() + '…')
+    return { backend: 'openviking', snippets }
+  }
   const json = (res, status, value) => {
     const body = JSON.stringify(value)
     res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) })
@@ -476,26 +499,12 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     return { result, target, limit }
   }
   async function grepMemory(body) {
-    if (body.includeUpdatedAt !== undefined && typeof body.includeUpdatedAt !== 'boolean') {
-      throw fail('invalid_query', 'includeUpdatedAt must be boolean')
-    }
     const { result, target, limit } = await runGrep(body)
     const hits = result.matches.slice(0, limit)
     const perHitChars = hits.length ? Math.min(600, Math.floor(6000 / hits.length)) : 600
     const matches = hits.map(m => ({ uri: m.uri, line: m.line,
       level: m.uri.endsWith('/.abstract.md') ? 0 : m.uri.endsWith('/.overview.md') ? 1 : 2,
       content: m.content.slice(0, perHitChars), truncated: m.content.length > perHitChars }))
-    if (body.includeUpdatedAt) {
-      const dates = new Map()
-      await Promise.all([...new Set(hits.map(hit => hit.uri))].map(async key => {
-        try {
-          const stat = await client.stat(key)
-          const date = stat.modTime || stat.mtime || stat.updated_at
-          if (Number.isFinite(Date.parse(date))) dates.set(key, date)
-        } catch { /* A keyword hit remains usable without its timestamp. */ }
-      }))
-      for (const match of matches) if (dates.has(match.uri)) match.updatedAt = dates.get(match.uri)
-    }
     return { backend: 'openviking', uri: target, pattern: body.pattern, matches, count: matches.length,
       limited: limit > 0 && result.matches.length >= limit, truncated: result.matches.length > limit || matches.some(m => m.truncated),
       filesScanned: Number.isFinite(result.files_scanned) ? result.files_scanned : null }
@@ -601,6 +610,7 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
         catch (e) { throw fail('migration_unavailable', e.message, 503) }
       }
       if (req.method === 'POST' && p === '/v2/ingests/lookup') return json(res, 200, await journal.lookup(await readJson(req)))
+      if (req.method === 'POST' && p === '/v2/memory/recent-by-app') return json(res, 200, await recentByApp(await readJson(req)))
       if (req.method === 'POST' && p === '/v1/grep') return json(res, 200, await grepMemory(await readJson(req)))
       if (req.method === 'POST' && ['/v1/search', '/v2/search', '/v2/recall', '/v2/ingest'].includes(p)) {
         const body = await readJson(req)

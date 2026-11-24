@@ -437,6 +437,8 @@ class SessionCompressorV3:
         allowed_peer_ids: Optional[set[str]] = None,
         event_search_tags: Optional[List[str]] = None,
         peer_memory_enabled: bool = True,
+        *,
+        memory_search_tags: Optional[List[str]] = None,
     ):
         if not agent_evolution_enabled:
             effective_types = (
@@ -477,6 +479,7 @@ class SessionCompressorV3:
                 peer_memory_enabled=peer_memory_enabled,
                 allowed_peer_ids=allowed_peer_ids,
                 event_search_tags=event_search_tags,
+                memory_search_tags=memory_search_tags,
             )
             agent_memory_types = _allowed_agent_memory_types(allowed_memory_types)
             cases_allowed = (
@@ -679,6 +682,7 @@ class SessionCompressorV3:
         peer_memory_enabled: bool = True,
         allowed_peer_ids: Optional[set[str]] = None,
         event_search_tags: Optional[List[str]] = None,
+        memory_search_tags: Optional[List[str]] = None,
     ) -> "_V3ExtractionResult":
         del user
         if not messages:
@@ -751,6 +755,11 @@ class SessionCompressorV3:
         # Attach caller-provided custom scalar tags to event memories so they
         # ride the same first write into the vector index (人填标量).
         _apply_event_search_tags(operations, event_search_tags)
+        if memory_search_tags:
+            from openviking.utils.tags import merge_search_tags
+
+            for op in operations.upsert_operations:
+                op.search_tags = merge_search_tags(op.search_tags, memory_search_tags)
 
         extraction_id = uuid4().hex
         extracted_at = datetime.now(timezone.utc).isoformat()

@@ -128,8 +128,10 @@ class OpenVikingClient {
   addMessages(sessionId, messages) {
     return this.request('POST', `/api/v1/sessions/${encodeURIComponent(sessionId)}/messages/batch`, { messages })
   }
-  commit(sessionId) {
-    return this.request('POST', `/api/v1/sessions/${encodeURIComponent(sessionId)}/commit`, { keep_recent_count: 0 })
+  commit(sessionId, tags = []) {
+    return this.request('POST', `/api/v1/sessions/${encodeURIComponent(sessionId)}/commit`, {
+      keep_recent_count: 0, ...(tags.length ? { extraction_metadata: { tags } } : {}),
+    })
   }
   task(taskId) { return this.request('GET', `/api/v1/tasks/${encodeURIComponent(taskId)}`) }
   consolidateMemories(target) {

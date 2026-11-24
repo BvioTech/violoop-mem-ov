@@ -571,9 +571,10 @@ class EventExtractionMetadataRequest(BaseModel):
 
 
 class ExtractionMetadataRequest(BaseModel):
-    """Per-memory-type extraction overrides for a single commit."""
+    """Caller tags for all extracted memories and event-specific overrides."""
 
     event: Optional[EventExtractionMetadataRequest] = None
+    tags: Optional[List[str]] = None
 
     model_config = {"extra": "forbid"}
 
@@ -686,6 +687,8 @@ async def commit_session(
     event_tags = _commit_event_tags(body.extraction_metadata)
     if event_tags is not None:
         commit_kwargs["event_tags"] = event_tags
+    if body.extraction_metadata and body.extraction_metadata.tags:
+        commit_kwargs["memory_tags"] = body.extraction_metadata.tags
     execution = await run_operation(
         operation="session.commit",
         telemetry=body.telemetry,
