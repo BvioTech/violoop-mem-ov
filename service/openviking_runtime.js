@@ -5,6 +5,7 @@ const net = require('net')
 const { spawn } = require('child_process')
 const { Embedder } = require('./embedder')
 const { startModelGateway } = require('./model_gateway')
+const { createQueryPreparer } = require('./retrieval_query')
 const { createMigrationEmbedder } = require('./migration_embedding')
 
 function groupId(name) {
@@ -83,6 +84,7 @@ async function startRuntime(config, { spawnProcess = spawn, embedder = new Embed
   const migrationEmbedder = createMigrationEmbedder({ ...options.migrationEmbedding,
     deviceModelUrl: options.deviceModelUrl, token })
   const timingDir = path.join(config.dataDir, 'legacy-migration', 'timings')
+  const prepareQuery = createQueryPreparer({ deviceModelUrl: options.deviceModelUrl, token })
   const gateway = await startModelGateway({ embedder, migrationEmbedder, token, deviceUrl: options.deviceModelUrl, timingDir })
   const configPath = path.join(options.runtimeDir, 'ov.conf')
   fs.writeFileSync(configPath, JSON.stringify(nativeConfig(config, gateway.url, token, engineKey)), { mode: 0o600 })
@@ -128,6 +130,7 @@ async function startRuntime(config, { spawnProcess = spawn, embedder = new Embed
   if (embedder.ensureLoaded) void embedder.ensureLoaded()
   return {
     engineKey, embedder,
+    prepareQuery,
     createEmbeddingApi: run => require('./embedding_api').createEmbeddingApi({ embedder, gatewayUrl: gateway.url, token, run }),
     async suspend() {
       gateway.setPaused(true)

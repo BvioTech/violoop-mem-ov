@@ -4,7 +4,6 @@ const http = require('http')
 const crypto = require('crypto')
 const { gatewayTiming } = require('./migration_timing')
 const { createEmbeddingQueue } = require('./embedding_queue')
-const { createQueryPreparer } = require('./retrieval_query')
 
 function authorized(req, token) {
   const actual = Buffer.from(req.headers.authorization || '')
@@ -26,8 +25,7 @@ async function readBody(req, max = 2 * 1024 * 1024) {
     throw Object.assign(new Error('invalid JSON'), { status: 400 })
   }
 }
-async function startModelGateway({ embedder, migrationEmbedder = null, token, deviceUrl, port = 0, timingDir,
-  prepareQuery = createQueryPreparer({ deviceModelUrl: deviceUrl, token }) }) {
+async function startModelGateway({ embedder, migrationEmbedder = null, token, deviceUrl, port = 0, timingDir }) {
   const device = new URL(deviceUrl)
   if (device.protocol !== 'http:' || device.hostname !== '127.0.0.1' || device.username || device.password) {
     throw new Error('device model URL must use HTTP on 127.0.0.1 without credentials')
@@ -60,26 +58,16 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
         const selectedEmbedder = remote ? migrationEmbedder : embedder
         const queue = queues[backend]
         const query = body.input_type === 'query'
-        const measured = { preparationMs: 0, queueMs: 0, computeMs: 0 }
+        const measured = { queueMs: 0, computeMs: 0 }
         const started = Date.now(), requestId = crypto.randomUUID()
         let status = 'ok'
         const data = []
-        let embeddingChars = 0, phase = 'preparation'
+        const inputChars = inputs.reduce((n, text) => n + text.length, 0)
         try {
-          const prepared = []
-          // Compile before entering the BGE queue. A cloud call must never hold
-          // the local inference slot or change document/index embeddings.
-          for (const input of inputs) {
-            if (abort.signal.aborted) throw Object.assign(Error('request cancelled'), { status: 499 })
-            prepared.push(query && !remote ? await prepareQuery(input, { signal: abort.signal }) : input)
-          }
-          measured.preparationMs = Date.now() - started
-          phase = 'embedding'
-          embeddingChars = prepared.reduce((n, s) => n + s.length, 0)
           const queueDone = timing?.stage('bge.gateway_queue', { purpose: timing.purpose, inputCount: inputs.length, backend })
           const result = await queue.run(async () => {
             if (!data.length) queueDone?.()
-            const input = prepared[data.length]
+            const input = inputs[data.length]
             if (res.destroyed) throw Object.assign(new Error('request cancelled'), { status: 499 })
             const done = timing?.stage('bge.compute', { purpose: timing.purpose, inputChars: input.length, backend })
             let vector
@@ -93,12 +81,11 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
           }, { query, signal: abort.signal, timing: measured })
           if (!res.destroyed) return json(res, 200, result)
         } catch (error) {
-          if (phase === 'preparation') measured.preparationMs = Date.now() - started
-          status = error.status || phase + '_error'; throw error
+          status = error.status || 'embedding_error'; throw error
         }
         finally {
           console.info('[bge.request]', JSON.stringify({ requestId, backend, purpose: query ? 'query' : 'document',
-            inputCount: inputs.length, inputChars: inputs.reduce((n, s) => n + s.length, 0), embeddingChars,
+            inputCount: inputs.length, inputChars, embeddingChars: inputChars,
             ...measured, elapsedMs: Date.now() - started, status }))
         }
         return

@@ -1,7 +1,7 @@
-// Private query-compilation transport. Device owns the cloud model, credentials
-// and cache; the memory service still owns BGE and the original stored content.
+// The retrieval adapter decides when to compile. Device owns the model,
+// credentials and cache.
 const http = require('http')
-const MAX_QUERY_CHARS = 256
+const MAX_PREPARED_QUERY_CHARS = 256
 
 function createQueryPreparer({ deviceModelUrl, token, timeoutMs = 3000 }) {
   const endpoint = new URL(deviceModelUrl)
@@ -10,7 +10,6 @@ function createQueryPreparer({ deviceModelUrl, token, timeoutMs = 3000 }) {
       !endpoint.pathname.endsWith('/chat/completions')) throw Error('Invalid device model URL')
   endpoint.pathname = endpoint.pathname.replace(/\/chat\/completions$/, '/retrieval-query')
   return function prepare(text, { signal } = {}) {
-    if (text.length <= MAX_QUERY_CHARS) return Promise.resolve(text)
     return new Promise((resolve, reject) => {
       const payload = Buffer.from(JSON.stringify({ version: 1, text }))
       const request = http.request(endpoint, { method: 'POST', signal, headers: {
@@ -28,7 +27,7 @@ function createQueryPreparer({ deviceModelUrl, token, timeoutMs = 3000 }) {
           try {
             const result = JSON.parse(Buffer.concat(chunks))
             if (result.version !== 1 || typeof result.query !== 'string' ||
-                !result.query.trim() || result.query.length > MAX_QUERY_CHARS) throw Error('invalid')
+                !result.query.trim() || result.query.length > MAX_PREPARED_QUERY_CHARS) throw Error('invalid')
             resolve(result.query.trim())
           } catch { reject(Error('invalid_prepared_query')) }
         })
@@ -42,4 +41,4 @@ function createQueryPreparer({ deviceModelUrl, token, timeoutMs = 3000 }) {
     })
   }
 }
-module.exports = { createQueryPreparer, MAX_QUERY_CHARS }
+module.exports = { createQueryPreparer }
