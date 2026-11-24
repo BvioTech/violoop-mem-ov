@@ -49,7 +49,7 @@ async function start(config, { runtimeOptions } = {}) {
     const nativeMigrationReady = client.migrationReady.bind(client)
     client.migrationReady = async () => await nativeMigrationReady() && await runtime.modelReady()
   }
-  const app = createApp(client, { dataDir: config.dataDir, ...config.openviking, prepareQuery: runtime?.prepareQuery })
+  const app = createApp(client, { dataDir: config.dataDir, ...config.openviking })
   if (runtime) {
     try { background = new (require('./background').BackgroundControl)({ dataDir: config.dataDir, app, client, runtime }) }
     catch (err) { await app.close(); await runtime.stop(); throw err }

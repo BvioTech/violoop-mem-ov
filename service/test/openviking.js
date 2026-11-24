@@ -11,7 +11,6 @@ const { spawn } = require('child_process')
 const { createApp, start } = require('../server')
 const { loadConfig } = require('../config')
 const { OpenVikingClient } = require('../openviking_client')
-const { createQueryPreparer } = require('../retrieval_query')
 const { mergeSearch } = require('../hybrid_search')
 const { boundPreviews } = require('../retrieval_budget')
 
@@ -50,11 +49,6 @@ before(async () => {
     if (req.url === '/ready') return send(ready ? 200 : 503, { status: ready ? 'ready' : 'not_ready', violoop_legacy_migration: 1, violoop_migration_embedding: 1 })
     if (behavior === 'error' || (behavior === 'commit_error' && req.url.endsWith('/commit'))) return send(500, { status: 'error', error: { message: 'native extraction failed' } })
     if (behavior === 'timeout') return // client must time out without a local fallback
-    if (req.url === '/internal/memory/retrieval-query') {
-      assert.equal(req.headers.authorization, 'Bearer model-key')
-      if (behavior === 'query_error') return send(503, {})
-      return send(200, { version: 1, query: 'Review and release dates' })
-    }
     if (req.url === '/api/v1/search/grep') {
       assert.deepEqual(Object.keys(body).sort(), ['case_insensitive', 'node_limit', 'pattern', 'uri'])
       if (body.pattern === '[') return send(400, { status: 'error', error: { message: 'invalid regular expression' } })
@@ -459,39 +453,22 @@ test('recall fetches top ten across all levels and bounds each returned preview'
   } finally { behavior = 'ok' }
 })
 
-test('the managed retrieval entry point forwards 2000 characters and prepares longer queries before native search', async t => {
-  const client = new OpenVikingClient(config.openviking)
-  const deviceModelUrl = new URL('/internal/memory/chat/completions', config.openviking.url)
-  const prepareQuery = createQueryPreparer({ deviceModelUrl, token: 'model-key' })
-  const app = createApp(client, { dataDir: fs.mkdtempSync(path.join(temp, 'direct-query-')), prepareQuery })
-  const server = http.createServer(app)
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  t.after(async () => {
-    server.closeAllConnections()
-    await new Promise(resolve => server.close(resolve))
-    await app.close()
-  })
-  const post = (route, body) => fetch(`http://127.0.0.1:${server.address().port}${route}`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-  })
-  const direct = '文'.repeat(1999) + '尾'
-  let start = calls.length
-  assert.equal((await post('/v1/search', { mode: 'recall', query: direct })).status, 200)
+test('search and recall reject oversized queries before calling OpenViking', async () => {
+  const direct = '文'.repeat(1998) + '😀'
+  const start = calls.length
+  assert.equal((await request('POST', '/v2/recall', { text: ` ${direct} ` })).status, 200)
   assert.deepEqual(calls.slice(start).map(call => [call.route, call.body.query]), [['/api/v1/search/find', direct]])
-  start = calls.length
-  const long = direct + '终'
-  assert.equal((await post('/v2/recall', { text: long })).status, 200)
-  assert.deepEqual(calls.slice(start).map(call => [call.route, call.body.text ?? call.body.query]),
-    [['/internal/memory/retrieval-query', long], ['/api/v1/search/find', 'Review and release dates']])
-  start = calls.length
-  behavior = 'query_error'
-  try {
-    const response = await post('/v1/search', { query: long })
-    assert.equal(response.status, 503)
-    assert.equal((await response.json()).error.code, 'query_preparation_failed')
-    assert.deepEqual(calls.slice(start).map(call => call.route), ['/internal/memory/retrieval-query'])
-  } finally { behavior = 'ok' }
+  const afterSearch = calls.length
+  for (const [route, field] of [['/v1/search', 'query'], ['/v2/search', 'query'], ['/v2/recall', 'text']]) {
+    for (const text of [direct + '终', '长'.repeat(6001)]) {
+      const result = await request('POST', route, { [field]: text })
+      assert.equal(result.status, 422)
+      assert.equal(result.body.error.code, 'query_too_long')
+      assert.equal(result.body.error.maxChars, 2000)
+      assert.equal(result.body.error.actualChars, text.length)
+    }
+  }
+  assert.equal(calls.length, afterSearch)
 })
 
 const parent = uri.slice(0, uri.lastIndexOf('/'))

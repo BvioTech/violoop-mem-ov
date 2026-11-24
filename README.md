@@ -40,7 +40,7 @@ npm start -- --data-dir "$PWD/.local/data" --socket "$PWD/.local/mem.sock"
 
 普通向量请求保持本地 BGE；迁移向量请求经 Device 的 `/internal/memory/embeddings`，使用当前登录用户自动领取、续期的模型网关凭证调用云端 `bge-m3`。无需单独配置迁移 URL 或密钥文件。
 
-托管服务在检索入口决定是否提炼查询。最多 2,000 个 UTF-16 单元直接送入 OpenViking 检索，超过时由 Device 的 `/internal/memory/retrieval-query` 提炼一次，失败返回检索错误。BGE 网关按收到的文本计算向量，提炼耗时记录在 `memory.query.prepare`，排队和计算耗时记录在 `bge.request`。
+检索入口去掉首尾空白后，最多接收 2,000 个 UTF-16 单元。超出时返回 HTTP 422 和 `query_too_long`，附 `maxChars` 和 `actualChars`。有效查询直接送入 OpenViking。BGE 网关按收到的文本计算向量，排队和计算耗时记录在 `bge.request`。
 
 ## 验证和构建
 

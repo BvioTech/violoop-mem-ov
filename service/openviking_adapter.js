@@ -8,8 +8,8 @@ const { PREVIEW_CHARS, boundPreviews } = require('./retrieval_budget')
 const { searchOptions, createMutations, enrich, metadata, levelOf, canonical } = require('./openviking_agent')
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024
-// Keep in sync with Compose's direct query budget.
-const DIRECT_QUERY_CHARS = 2000
+// Keep in sync with Compose's query limit.
+const MAX_QUERY_CHARS = 2000
 const TRIVIAL_RE = /^(continue|go on|next|ok(ay)?|yep|yes|no|sure|done|thx|thanks?|嗯+|哦+|好+的?|继续|行|对|是的?|可以|没事了?|不用了?|算了)[\s.!~。！？]*$/i
 const fail = (code, message, status = 400) => Object.assign(new Error(message), { code, status })
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -21,7 +21,12 @@ function integer(value, fallback, max = 50) {
 }
 function query(value, name = 'query') {
   if (typeof value !== 'string' || !value.trim()) throw fail('invalid_query', `${name} must be a non-empty string`)
-  return value.trim().slice(0, 6000)
+  const text = value.trim()
+  if (text.length > MAX_QUERY_CHARS) {
+    throw Object.assign(fail('query_too_long', `${name} exceeds ${MAX_QUERY_CHARS} UTF-16 units`, 422),
+      { maxChars: MAX_QUERY_CHARS, actualChars: text.length })
+  }
+  return text
 }
 function uri(value) {
   validateVikingUri(value)
@@ -304,7 +309,7 @@ class IngestJournal {
 }
 
 function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 8000,
-  abstractMaxChars = 600, readMaxChars = 6000, legacySourceFile, coexistence = false, prepareQuery } = {}) {
+  abstractMaxChars = 600, readMaxChars = 6000, legacySourceFile, coexistence = false } = {}) {
   if (!dataDir) throw new Error('adapter dataDir is required')
   for (const value of [recallMaxChars, searchMaxChars, abstractMaxChars, readMaxChars]) {
     if (!Number.isInteger(value) || value < 1 || value > 100000) throw new Error('content limits must be integers in [1, 100000]')
@@ -369,12 +374,12 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) })
     res.end(body)
   }
-  async function retrieve(body, mode, requestedLimit, signal) {
+  async function retrieve(body, mode, requestedLimit) {
     if (!['recall', 'search'].includes(mode)) throw fail('invalid_query', 'mode must be recall or search')
     const pattern = keywordsPattern(body.keywords)
     const options = searchOptions(body, client, { automatic: mode === 'recall' })
     if (mode === 'recall' && pattern) throw fail('invalid_query', 'keywords are only supported by search')
-    let q = query(body.query)
+    const q = query(body.query)
     const requested = integer(requestedLimit ?? body.limit, 10)
     const limit = mode === 'recall' || pattern ? Math.min(requested, 10) : requested
     // No default score floor. Explicit caller thresholds remain wire-compatible.
@@ -389,20 +394,6 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     if (!limit) return []
     if (mode === 'recall' && (q.length < 8 || TRIVIAL_RE.test(q))) return []
     const level = body.level === undefined ? undefined : integer(body.level, 0, 2)
-    if (prepareQuery && q.length > DIRECT_QUERY_CHARS) {
-      const inputChars = q.length, started = Date.now()
-      let prepared
-      try {
-        prepared = await prepareQuery(q, { signal })
-      } catch {
-        throw fail('query_preparation_failed', 'Could not prepare the memory query', 503)
-      } finally {
-        console.info('[memory.query.prepare]', JSON.stringify({ mode, inputChars,
-          outputChars: prepared?.length ?? 0, elapsedMs: Date.now() - started }))
-      }
-      signal.throwIfAborted()
-      q = prepared
-    }
     if (pattern) {
       // Both branches use the same explicit scope. With keywords, the default
       // is the user's memories; no-keyword calls retain native default scope.
@@ -605,20 +596,18 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
           }
           return json(res, 202, await journal.ingest(body))
         }
-        const abort = new AbortController()
-        res.once('close', () => abort.abort())
         if (p === '/v2/recall') {
           const text = query(body.text, 'text')
           const maxEntities = integer(body.maxEntities, 10)
           integer(body.maxRelations, 5)
           if (text.length < 8 || TRIVIAL_RE.test(text)) return json(res, 200, { backend: 'openviking', results: [], entities: [], relations: [] })
-          const hits = await retrieve({ ...body, query: text }, 'recall', maxEntities, abort.signal)
+          const hits = await retrieve({ ...body, query: text }, 'recall', maxEntities)
           return json(res, 200, { backend: 'openviking', results: hits, entities: hits.map(h => entity(h, true)), relations: [] })
         }
         // Agent/proactive search uses native search; automatic recall uses
         // /v2/recall and native find. Return summaries for progressive reading.
         const mode = body.mode ?? 'search'
-        const hits = await retrieve(body, mode, undefined, abort.signal)
+        const hits = await retrieve(body, mode)
         return json(res, 200, { backend: 'openviking', results: hits })
       }
       if (/^\/v[12]\/(memories|tree|zones|import|backup|restore|rollback|entities|relations|episodes|provenance|prune|touch|domains|graph|stats|match)(\/|$)/.test(p)) {
@@ -629,7 +618,8 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
       if (res.destroyed) return
       if (req.method === 'GET' && err.upstreamStatus === 404) return json(res, 404, { error: { code: 'not_found', message: 'Memory URI not found' } })
       if (!err.status) console.error('[violoop-mem-ov] adapter error:', err.message)
-      return json(res, err.status || 500, { error: { code: err.code || 'internal', message: err.status ? err.message : 'internal error' } })
+      return json(res, err.status || 500, { error: { code: err.code || 'internal', message: err.status ? err.message : 'internal error',
+        ...(err.code === 'query_too_long' ? { maxChars: err.maxChars, actualChars: err.actualChars } : {}) } })
     }
   }
   app.setPaused = paused => migration.setPaused(paused)
