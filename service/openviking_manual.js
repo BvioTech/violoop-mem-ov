@@ -3,6 +3,11 @@
 const { validateVikingUri } = require('./openviking_uri')
 const TYPES = ['entities', 'events', 'preferences', 'profile']
 const fail = message => Object.assign(new Error(message), { status: 400, code: 'invalid_query' })
+const isProjectId = value => typeof value === 'string' && /^[a-z0-9_-]{1,100}$/i.test(value)
+function projectTag(projectId) {
+  if (!isProjectId(projectId)) throw fail('A valid projectId is required')
+  return 'project_id=' + projectId.toLowerCase()
+}
 function segment(value, field, lower = false) {
   if (typeof value !== 'string' || !value.trim()) throw fail(`${field} is required`)
   const text = value.trim().normalize('NFC')
@@ -17,14 +22,21 @@ function filename(value) {
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(safe)) safe = '_' + safe
   return safe
 }
+function entityMemoryPath(category, name, suffix = '') {
+  const stem = filename(name.normalize('NFC').toLowerCase())
+  const uniqueStem = suffix ? [...stem].slice(0, 46 - suffix.length).join('') + suffix : stem
+  return `entities/${filename(category.normalize('NFC').toLowerCase())}/${uniqueStem}.md`
+}
+function manualMemoryUri(client, path) {
+  return validateVikingUri(`viking://user/${client.user}/memories/${path}`)
+}
 function planMemory(body, client) {
   const memoryType = body.memoryType
   if (!TYPES.includes(memoryType)) throw fail('Choose entities, events, preferences or profile')
-  const root = `viking://user/${client.user}/memories`
   let suffix, fields = {}
   if (memoryType === 'entities') {
     const category = segment(body.category, 'category'), name = segment(body.name, 'name')
-    fields = { category, name }; suffix = `entities/${filename(category.toLowerCase())}/${filename(name.toLowerCase())}.md`
+    fields = { category, name }; suffix = entityMemoryPath(category, name)
   } else if (memoryType === 'preferences') {
     const user = segment(body.owner, 'owner'), topic = segment(body.topic, 'topic')
     fields = { user, topic }; suffix = `preferences/${filename(user.toLowerCase())}/${filename(topic.toLowerCase())}.md`
@@ -34,8 +46,7 @@ function planMemory(body, client) {
     fields = { event_name: name, event_date: date, goal: name, summary: body.content || '', ranges: '' }
     suffix = `events/${date.replaceAll('-', '/')}/${filename(name)}.md`
   } else suffix = 'profile.md'
-  const uri = root + '/' + suffix
-  validateVikingUri(uri)
+  const uri = manualMemoryUri(client, suffix)
   return { uri, key: uri, level: 2, memoryType, fields }
 }
 async function previewMemory(body, client) {
@@ -48,8 +59,22 @@ async function previewMemory(body, client) {
 function serializeMemory(plan, content) {
   if (typeof content !== 'string' || !content.trim() || content.length > 1000000) throw fail('content is required (maximum 1000000 characters)')
   if (/<!--\s*MEMORY_FIELDS\b/i.test(content)) throw fail('Reserved memory metadata cannot be entered in the body')
+  return renderMemory(plan, content)
+}
+function renderMemory(plan, content, timestamps = {}) {
   const now = new Date().toISOString()
-  const fields = { ...plan.fields, memory_type: plan.memoryType, version: 1, created_at: now, updated_at: now }
+  const fields = { ...plan.fields, memory_type: plan.memoryType, version: 1, created_at: now, updated_at: now, ...timestamps }
   return content + '\n\n<!-- MEMORY_FIELDS\n' + JSON.stringify(fields, null, 2).replaceAll('-->', '--\\u003e') + '\n-->'
 }
-module.exports = { planMemory, previewMemory, serializeMemory }
+function legacyProjectWrite(memory, client) {
+  const { category, name, memoryType, content, filenameSuffix, createdAt, updatedAt } = memory
+  // OpenViking normally trims manual bodies when it parses their metadata.
+  const fields = { category, name, preserve_body_whitespace: true }
+  const timestamps = {
+    ...(createdAt ? { created_at: createdAt } : {}),
+    ...(updatedAt ? { updated_at: updatedAt } : {}),
+  }
+  return { uri: manualMemoryUri(client, entityMemoryPath(category, name, filenameSuffix)),
+    serializedContent: renderMemory({ memoryType, fields }, content, timestamps) }
+}
+module.exports = { planMemory, previewMemory, serializeMemory, isProjectId, projectTag, entityMemoryPath, legacyProjectWrite }

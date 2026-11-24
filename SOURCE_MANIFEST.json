@@ -18660,7 +18660,8 @@
         {
           "path": "openviking/session/memory/utils/memory_fields.py",
           "sha256": "0e9fc85fce8b414dfef12a67d635c49d28ed4ad07524210ba766b0f0a64404e7",
-          "destination": "engine/openviking/session/memory/utils/memory_fields.py"
+          "destination": "engine/openviking/session/memory/utils/memory_fields.py",
+          "integration_sha256": "735d35144871b984be18b25a4b9807ef726cd4707e0692547a27eee008b66253"
         },
         {
           "path": "openviking/session/memory/utils/memory_file_utils.py",
@@ -18671,7 +18672,8 @@
         {
           "path": "openviking/session/memory/utils/messages.py",
           "sha256": "e91e75560b885848aceba306c9642a7a81ecb0f45b77f45b0ea8b329ed94c2a3",
-          "destination": "engine/openviking/session/memory/utils/messages.py"
+          "destination": "engine/openviking/session/memory/utils/messages.py",
+          "integration_sha256": "02fcdbe5c5d41500a089ef67315853800fb3b17dbba0c49e9cdf15801341d81c"
         },
         {
           "path": "openviking/session/memory/utils/model.py",

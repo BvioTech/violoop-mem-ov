@@ -4,6 +4,7 @@ const { readLegacySnapshot, hash, legacyFacts } = require('./legacy_source')
 const { writeJson } = require('./durable_json')
 const { startStage, appendTiming } = require('./migration_timing')
 const { modelError } = require('./model_error')
+const { legacyProjectWrite } = require('./openviking_manual')
 
 const SKIPPED_STATUSES = new Set(['failed'])
 const AUTOMATIC_RETRY_DELAYS_MS = Object.freeze([10000, 30000, 60000])
@@ -11,7 +12,7 @@ const permanentFailure = error => modelError(error).retryable === false
 
 class LegacyMigration {
   constructor({ dataDir, sourceFile = path.join(dataDir, 'graph.db'), client, journal, pollMs = 3000, autoResume = true,
-    retryDelaysMs = AUTOMATIC_RETRY_DELAYS_MS, now = Date.now, coexistence = false }) {
+    retryDelaysMs = AUTOMATIC_RETRY_DELAYS_MS, now = Date.now, coexistence = false, invalidateEntries = () => {} }) {
     if (!Array.isArray(retryDelaysMs) || retryDelaysMs.length !== 3 || retryDelaysMs.some(ms => !Number.isFinite(ms) || ms < 0)) {
       throw new Error('Migration requires three non-negative automatic retry delays')
     }
@@ -25,6 +26,7 @@ class LegacyMigration {
     this.sourceFile = sourceFile
     this.client = client
     this.journal = journal
+    this.invalidateEntries = invalidateEntries
     this.pollMs = pollMs
     this.state = null
     this.running = false
@@ -80,6 +82,8 @@ class LegacyMigration {
     if (!s || s.version !== 1 || s.scope !== hash(this.client.scope) || !Array.isArray(s.batches) || !Array.isArray(s.resources)) {
       throw new Error('Migration state is invalid or belongs to a different OpenViking scope')
     }
+    if (s.projectMemories === undefined) s.projectMemories = []
+    if (!Array.isArray(s.projectMemories)) throw new Error('Invalid migration project memories')
     if (s.automaticRetryCount !== undefined && (!Number.isInteger(s.automaticRetryCount) || s.automaticRetryCount < 0 || s.automaticRetryCount > 3)) {
       throw new Error('Invalid migration automatic retry count')
     }
@@ -193,14 +197,17 @@ class LegacyMigration {
       }
       pendingCount = this.inventoryCount
     } else {
-      const completed = new Set(this.state.batches.filter(b => b.status === 'completed').flatMap(b => b.claims))
+      const completed = new Set([...this.state.batches, ...this.state.projectMemories]
+        .filter(item => item.status === 'completed').flatMap(item => item.claims))
       pendingCount = this.state.resources.filter(r => !r.claims.every(c => completed.has(c))).length
     }
     const sourceRevision = this.state?.sourceRevision || null
     const sourceCurrent = !this.coexistence || !!this.state?.activatedAt ||
       (sourceRevision && fs.existsSync(this.sourceFile) && hash(JSON.stringify(legacyFacts(readLegacySnapshot(this.sourceFile)))) === sourceRevision)
     const readyForCutover = !!this.state && !this.running && !this.starting && !this.state.started && !this.state.resetPending
-      && this.state.batches.every(b => b.status === 'completed') && !this.lastError && !this.state.lastError && !!sourceCurrent
+      && this.state.batches.every(b => b.status === 'completed')
+      && this.state.projectMemories.every(m => m.status === 'completed')
+      && !this.lastError && !this.state.lastError && !!sourceCurrent
     return { backend: 'openviking', migration: true, enabled: true,
       activated: !!this.state?.activatedAt, activatedAt: this.state?.activatedAt || null,
       readyForCutover, sourceRevision, sourceCurrent: !!sourceCurrent,
@@ -230,6 +237,7 @@ class LegacyMigration {
     if (!this.state) throw Object.assign(new Error('Migration has not initialized'), { status: 409 })
     this.state.activatedAt = Date.now()
     this.save()
+    this.invalidateEntries()
     clearTimeout(this.timer)
     return this.status()
   }
@@ -237,12 +245,18 @@ class LegacyMigration {
     if (this.paused || this.stopped || this.running || this.starting || this.state?.started || this.state?.activatedAt) return
     this.starting = true
     try {
-      if (!this.state?.batches.every(b => b.status === 'completed')) return
+      if (!this.state?.batches.every(b => b.status === 'completed')
+        || !this.state.projectMemories.every(m => m.status === 'completed')) return
       const snapshot = readLegacySnapshot(this.sourceFile)
       const facts = legacyFacts(snapshot), revision = hash(JSON.stringify(facts))
       if (revision === this.state.sourceRevision && !this.state.resetPending) { this.lastError = null; return }
+      const plan = require('./legacy_migration_plan').planMigration(snapshot)
+      const previousProjects = new Map(this.state.projectMemories.map(m => [m.key, m]))
+      // A new normalization collision can change an existing entry's URI.
+      const renamed = plan.projectMemories.some(m => previousProjects.has(m.key)
+        && previousProjects.get(m.key).filenameSuffix !== m.filenameSuffix)
       const current = new Set(facts)
-      const reset = this.state.resetPending || !this.state.sourceFacts || this.state.sourceFacts.some(f => !current.has(f))
+      const reset = this.state.resetPending || renamed || !this.state.sourceFacts || this.state.sourceFacts.some(f => !current.has(f))
       if (reset) {
         // Only the migration-owned staging store may be rebuilt. Once active,
         // native user data must never be reset because the old daemon changed.
@@ -252,9 +266,10 @@ class LegacyMigration {
           this.state.generation = (this.state.generation || 0) + 1
           this.save()
         }
-        await this.client.resetMigrationMemory()
+        try { await this.client.resetMigrationMemory() }
+        finally { this.invalidateEntries() }
       }
-      const plan = require('./legacy_migration_plan').planMigration(snapshot)
+      const projectMemories = plan.projectMemories.map(m => (!reset && previousProjects.get(m.key)) || { ...m, status: 'pending' })
       const previous = new Map(reset ? [] : this.state.batches.map(b => [b.id, b]))
       const generation = this.state.generation || 0
       const batches = plan.batches.map(b => {
@@ -264,7 +279,7 @@ class LegacyMigration {
         writeJson(path.join(this.dir, 'batches', id + '.json'), body)
         return { id, checksum: hash(JSON.stringify(body)), claims: b.claims, groups: b.groups, tokens: b.tokens, status: 'pending' }
       })
-      Object.assign(this.state, { batches, resources: plan.resources, sourceFacts: facts, sourceRevision: revision,
+      Object.assign(this.state, { batches, projectMemories, resources: plan.resources, sourceFacts: facts, sourceRevision: revision,
         resetPending: false, started: true, phase: 'catch-up', automaticRetryDone: false, automaticRetryCount: 0, lastError: null })
       this.lastError = null
       this.save()
@@ -309,7 +324,8 @@ class LegacyMigration {
         })
         this.state = { version: 1, scope: hash(this.client.scope), sourceFile: this.sourceFile,
           snapshotHash: hash(JSON.stringify(snapshot)), tokenizer: plan.tokenizer,
-          maxTokens: plan.maxTokens, resources: plan.resources, batches, started: false,
+          maxTokens: plan.maxTokens, resources: plan.resources, batches,
+          projectMemories: plan.projectMemories.map(m => ({ ...m, status: 'pending' })), started: false,
           phase: 'primary', automaticRetryDone: false, automaticRetryCount: 0 }
         if (this.coexistence) Object.assign(this.state, { coexistence: true, sourceFacts: legacyFacts(snapshot),
           sourceRevision: hash(JSON.stringify(legacyFacts(snapshot))) })
@@ -321,7 +337,8 @@ class LegacyMigration {
       // Explicit Start after repairing credentials retries failed work as well
       // as untouched pending batches. Completed receipts are never replayed.
       if (this.state.batches.some(b => b.status === 'failed')) retriedBatches = this.prepareRetries('manual-retry')
-      if (!this.state.batches.some(b => b.status !== 'completed')) {
+      if (this.state.batches.every(b => b.status === 'completed')
+          && this.state.projectMemories.every(m => m.status === 'completed')) {
         if (this.coexistence) this.resume(); return { started: false, reason: 'complete' }
       }
       this.state.phase ||= 'primary' // Resume in-progress states from older releases.
@@ -380,6 +397,27 @@ class LegacyMigration {
     this.save()
     return b.status === 'completed'
   }
+  async writeProjectMemory(memory) {
+    const { uri, serializedContent } = legacyProjectWrite(memory, this.client)
+    let exists = true
+    try { await this.client.stat(uri) }
+    catch (e) {
+      if (e.upstreamStatus !== 404 && e.status !== 404) throw e
+      exists = false
+    }
+    if (this.paused || this.stopped) return false
+    try {
+      // Native replace preserves the existing metadata. Supply the serialized
+      // file only on the first write so a retry cannot nest a second trailer.
+      const result = await this.client.writeMemory(uri, exists ? memory.content : serializedContent,
+        { mode: 'replace', tags: [memory.tag], wait: true })
+      if (result?.vector_status !== 'complete') throw new Error(`Project memory indexing did not complete for ${memory.key}`)
+      memory.status = 'completed'
+      delete memory.lastAttemptError
+      this.save()
+      return true
+    } finally { this.invalidateEntries() }
+  }
   async run() {
     if (this.paused || this.running || this.stopped || !this.state?.started || this.loadError) return
     clearTimeout(this.timer)
@@ -397,7 +435,8 @@ class LegacyMigration {
       while (!this.paused && !this.stopped && this.state.started) {
         this.lastTickAt = Date.now()
         const b = this.state.batches.find(b => b.status !== 'completed' && !SKIPPED_STATUSES.has(b.status))
-        if (!b) {
+        const project = !b && this.state.projectMemories.find(m => m.status !== 'completed')
+        if (!b && !project) {
           if (!this.state.automaticRetryDone && this.state.phase !== 'manual-retry') {
             if (this.automaticRetryCount() < 3 && this.state.batches.some(b => this.automaticRetryCandidate(b))) {
               if (this.state.nextRetryAt === undefined) {
@@ -414,11 +453,13 @@ class LegacyMigration {
           this.state.started = false; this.state.lastError = null; this.lastError = null; this.save(); break
         }
         try {
-          if (await this.step(b)) { this.lastError = null; this.state.lastError = null; continue }
+          const completed = b ? await this.step(b) : await this.writeProjectMemory(project)
+          if (completed) { this.lastError = null; this.state.lastError = null; continue }
         } catch (e) {
           this.lastError = this.state.lastError = { message: e.message, at: Date.now(),
             ...(e.requiresAction ? modelError(e) : {}) }
-          b.lastAttemptError = this.lastError
+          const item = b || project
+          item.lastAttemptError = this.lastError
           if (e.pauseMigration || permanentFailure(e)) this.state.started = false
           this.save()
         }

@@ -1,5 +1,6 @@
 const { encode } = require('gpt-tokenizer/encoding/o200k_base')
-const { hash, observationHash } = require('./legacy_source')
+const { hash, observationHash, legacyProjectKey } = require('./legacy_source')
+const { projectTag, entityMemoryPath } = require('./openviking_manual')
 
 const MAX_TOKENS = 5000
 const SOURCE_PREFIX = 'violoop-legacy-migration:'
@@ -9,22 +10,46 @@ const obsKey = (e, o) => `observation:${e.id}:${observationHash(o)}`
 const entKey = e => `entity:${e.id}`
 const relKey = r => `relation:${r.id}`
 const noteKey = m => `memory:${m.id}`
+// Include the whitespace recognized by Python's MEMORY_FIELDS parser.
+const RESERVED_MARKER = /<(?=!--[\s\x1c-\x1f\x85]*MEMORY_FIELDS\b)/gi
 
-function timestamp(value) {
-  if (typeof value !== 'string' || !value.trim() || !Number.isFinite(Date.parse(value))) {
-    throw new Error(`Legacy record has invalid created_at: ${String(value)}`)
+function validTimestamp(value) {
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Date.parse(value))) {
+    return new Date(value).toISOString()
   }
-  return new Date(value).toISOString()
+}
+function timestamp(value) {
+  const time = validTimestamp(value)
+  if (time === undefined) throw new Error(`Legacy record has invalid created_at: ${String(value)}`)
+  return time
 }
 function identity(e) { return { id: e.id, name: e.name, type: e.type, aliases: e.aliases } }
 function card(e, observations) {
   return { ...identity(e), observations, properties: e.properties, domains: e.domains, curated: !!e.curated }
 }
+function assignProjectFilenames(memories) {
+  memories.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+  const reserved = new Set(memories.map(m => entityMemoryPath(m.category, m.name)))
+  const assigned = new Set()
+  for (const m of memories) {
+    const base = entityMemoryPath(m.category, m.name)
+    if (!assigned.has(base)) { assigned.add(base); continue }
+    // Reserve natural paths first, including names that already end in a hash.
+    for (let attempt = 0; ; attempt++) {
+      const suffix = '-' + hash(attempt ? `${m.key}\0${attempt}` : m.key).slice(0, 10)
+      const path = entityMemoryPath(m.category, m.name, suffix)
+      if (reserved.has(path)) continue
+      m.filenameSuffix = suffix
+      reserved.add(path)
+      break
+    }
+  }
+}
 
 function planMigration(snapshot, { maxTokens = MAX_TOKENS, count = countMessages } = {}) {
   const entities = new Map(snapshot.entities.map(e => [e.id, e]))
   const relations = new Map(snapshot.relations.map(r => [r.id, r]))
-  const covered = new Set(), resources = [], associated = [], remaining = []
+  const covered = new Set(), resources = [], associated = [], remaining = [], projectMemories = []
   const relationData = r => {
     const source = entities.get(r.source), target = entities.get(r.target)
     if (!source || !target) throw new Error(`Legacy relation ${r.id} has a missing endpoint`)
@@ -40,6 +65,15 @@ function planMigration(snapshot, { maxTokens = MAX_TOKENS, count = countMessages
   }
   for (const m of snapshot.memories) {
     resources.push({ id: noteKey(m), claims: [noteKey(m)] })
+    const project = legacyProjectKey(m.key)
+    if (project) {
+      const content = typeof m.content === 'string' && /[^\s\x1c-\x1f\x85]/.test(m.content)
+        ? m.content.replace(RESERVED_MARKER, '&lt;') : '(Empty legacy project memory)'
+      projectMemories.push({ ...project, key: m.key, memoryType: 'entities', category: project.projectId,
+        tag: projectTag(project.projectId), claims: [noteKey(m)], content,
+        createdAt: validTimestamp(m.created_at), updatedAt: validTimestamp(m.updated_at) })
+      continue
+    }
     const a = snapshot.associations[m.key] || { observations: {}, relations: [] }
     const related = [], claims = [noteKey(m)]
     for (const [id, hashes] of Object.entries(a.observations)) {
@@ -87,7 +121,8 @@ function planMigration(snapshot, { maxTokens = MAX_TOKENS, count = countMessages
     if (batch.tokens >= maxTokens) flush() // oversized indivisible groups travel alone
   }
   flush()
-  return { resources, batches, tokenizer: 'o200k_base', maxTokens }
+  assignProjectFilenames(projectMemories)
+  return { resources, batches, projectMemories, tokenizer: 'o200k_base', maxTokens }
 }
 
 module.exports = { planMigration, countMessages, MAX_TOKENS, SOURCE_PREFIX }

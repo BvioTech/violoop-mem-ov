@@ -8,7 +8,10 @@ from typing import Any, Dict, List
 
 import json_repair
 
-from openviking.session.memory.utils.memory_fields import MEMORY_FIELDS_COMMENT_RE
+from openviking.session.memory.utils.memory_fields import (
+    MEMORY_FIELDS_COMMENT_RE,
+    PRESERVE_BODY_WHITESPACE,
+)
 from openviking.telemetry import tracer
 from openviking.utils.message_format import format_messages
 from openviking_cli.utils import get_logger
@@ -54,8 +57,11 @@ def parse_memory_file_with_fields(content: str) -> Dict[str, Any]:
             except Exception as e:
                 tracer.warning(f"Failed to parse MEMORY_FIELDS JSON: {e}")
 
-    # Remove the comment from content
-    content_without_comment = MEMORY_FIELDS_COMMENT_RE.sub("", content).strip()
+    # Migrated bodies can distinguish their own whitespace from the separator.
+    if match and result.get(PRESERVE_BODY_WHITESPACE) is True and not content[match.end() :].strip():
+        content_without_comment = content[: match.start()].removesuffix("\n\n")
+    else:
+        content_without_comment = MEMORY_FIELDS_COMMENT_RE.sub("", content).strip()
     result["content"] = content_without_comment
 
     return result

@@ -36,12 +36,6 @@ function uri(value) {
   if (value === 'viking://') return value
   return value.replace(/\/(\.abstract|\.overview)\.md$/, '').replace(/\/$/, '')
 }
-function projectTag(projectId) {
-  if (typeof projectId !== 'string' || !/^[a-z0-9_-]{1,100}$/i.test(projectId)) {
-    throw fail('invalid_query', 'A valid projectId is required')
-  }
-  return 'project_id=' + projectId.toLowerCase()
-}
 function stable(value) {
   if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']'
   if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + stable(value[k])).join(',') + '}'
@@ -355,9 +349,10 @@ function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 80
       throw err
     }
   })
-  const migration = new (require('./legacy_migration').LegacyMigration)({ dataDir,
-    ...(legacySourceFile ? { sourceFile: legacySourceFile } : {}), client, journal, coexistence, autoResume: false })
   const entries = createEntries(client)
+  const migration = new (require('./legacy_migration').LegacyMigration)({ dataDir,
+    ...(legacySourceFile ? { sourceFile: legacySourceFile } : {}), client, journal, coexistence, autoResume: false,
+    invalidateEntries: () => entries.invalidate() })
   const consolidation = new (require('./openviking_consolidation').MemoryConsolidation)(client, graph,
     { dataDir, invalidate: () => entries.invalidate() })
   const canonicalUri = value => uri(value).replace('viking://~/', 'viking://user/' + client.user + '/')
@@ -632,7 +627,7 @@ function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 80
       }
       if (req.method === 'POST' && p === '/v1/memory-entries') {
         const body = await readJson(req), plan = manual.planMemory(body, client)
-        const tags = body.projectId === undefined ? undefined : [projectTag(body.projectId)]
+        const tags = body.projectId === undefined ? undefined : [manual.projectTag(body.projectId)]
         return json(res, 201, await mutate('create', plan.uri, { content: manual.serializeMemory(plan, body.content), tags }))
       }
       if (req.method === 'PATCH' && p === '/v1/core-memories') {
@@ -644,7 +639,7 @@ function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 80
       }
       if (req.method === 'POST' && p === '/v1/project-memories/list') {
         const body = await readJson(req)
-        const tag = projectTag(body.projectId)
+        const tag = manual.projectTag(body.projectId)
         const offset = integer(body.offset, 0, 100000000)
         const limit = integer(body.limit, 20)
         if (!limit) throw fail('invalid_query', 'limit must be positive')
