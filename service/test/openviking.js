@@ -376,6 +376,14 @@ test('grep calls native grep only, preserving regex, file scope and line evidenc
   const sidecars = await request('POST', '/v1/grep', { pattern: 'sidecars' })
   assert.deepEqual(sidecars.body.matches.map(m => m.level), [0, 1])
 })
+test('grep can include file update metadata without invoking semantic search', async () => {
+  const start = calls.length
+  const result = await request('POST', '/v1/grep', { pattern: '海拉尔', includeUpdatedAt: true })
+  assert.equal(result.status, 200)
+  assert.ok(result.body.matches.every(match => match.updatedAt === '2026-10-10T01:00:00Z'))
+  assert.deepEqual(calls.slice(start).map(call => call.route.split('?')[0]), ['/api/v1/search/grep', '/api/v1/fs/stat'])
+  assert.equal((await request('POST', '/v1/grep', { pattern: '海拉尔', includeUpdatedAt: 'yes' })).status, 400)
+})
 test('grep bounds total snippets and distinguishes misses, invalid patterns and upstream failures', async () => {
   const many = await request('POST', '/v1/grep', { pattern: 'many', limit: 50 })
   assert.equal(many.body.matches.length, 50)

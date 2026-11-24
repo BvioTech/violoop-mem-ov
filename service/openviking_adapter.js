@@ -476,12 +476,26 @@ function createApp(client, { dataDir, recallMaxChars = 2500, searchMaxChars = 80
     return { result, target, limit }
   }
   async function grepMemory(body) {
+    if (body.includeUpdatedAt !== undefined && typeof body.includeUpdatedAt !== 'boolean') {
+      throw fail('invalid_query', 'includeUpdatedAt must be boolean')
+    }
     const { result, target, limit } = await runGrep(body)
     const hits = result.matches.slice(0, limit)
     const perHitChars = hits.length ? Math.min(600, Math.floor(6000 / hits.length)) : 600
     const matches = hits.map(m => ({ uri: m.uri, line: m.line,
       level: m.uri.endsWith('/.abstract.md') ? 0 : m.uri.endsWith('/.overview.md') ? 1 : 2,
       content: m.content.slice(0, perHitChars), truncated: m.content.length > perHitChars }))
+    if (body.includeUpdatedAt) {
+      const dates = new Map()
+      await Promise.all([...new Set(hits.map(hit => hit.uri))].map(async key => {
+        try {
+          const stat = await client.stat(key)
+          const date = stat.modTime || stat.mtime || stat.updated_at
+          if (Number.isFinite(Date.parse(date))) dates.set(key, date)
+        } catch { /* A keyword hit remains usable without its timestamp. */ }
+      }))
+      for (const match of matches) if (dates.has(match.uri)) match.updatedAt = dates.get(match.uri)
+    }
     return { backend: 'openviking', uri: target, pattern: body.pattern, matches, count: matches.length,
       limited: limit > 0 && result.matches.length >= limit, truncated: result.matches.length > limit || matches.some(m => m.truncated),
       filesScanned: Number.isFinite(result.files_scanned) ? result.files_scanned : null }

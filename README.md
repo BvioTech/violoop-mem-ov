@@ -42,6 +42,8 @@ npm start -- --data-dir "$PWD/.local/data" --socket "$PWD/.local/mem.sock"
 
 检索入口去掉首尾空白后，最多接收 2,000 个 UTF-16 单元。超出时返回 HTTP 422 和 `query_too_long`，附 `maxChars` 和 `actualChars`。有效查询直接送入 OpenViking。BGE 网关按收到的文本计算向量，排队和计算耗时记录在 `bge.request`。
 
+纯关键词查询走 `POST /v1/grep`。可指定 `includeUpdatedAt: true`，在命中片段中附上文件更新时间。
+
 ## 验证和构建
 
 ```sh
