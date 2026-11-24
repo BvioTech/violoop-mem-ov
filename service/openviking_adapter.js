@@ -566,7 +566,9 @@ function createApp(client, { dataDir, recallMaxChars = 8000, searchMaxChars = 80
         if (p === '/v2/graph/details' && url.searchParams.get('view') === 'memory') {
           return json(res, 200, await graph.detail(query(url.searchParams.get('id'), 'id')))
         }
-        if (p === '/healthz') return json(res, 200, { status: 'ok', backend: 'openviking' })
+        if (p === '/healthz') {
+          return json(res, 200, { status: 'ok', backend: 'openviking', capabilities: { projectMemoryTags: true } })
+        }
         if (p === '/v2/migration/status') {
           try { return json(res, 200, migration.status()) }
           catch (e) { throw fail('migration_unavailable', e.message, 503) }

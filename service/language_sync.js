@@ -16,7 +16,11 @@ function normalizeLanguage(value) {
 
 function resolveLanguage(snapshot) {
   const selected = String(snapshot?.ui || '').trim()
-  return normalizeLanguage(!selected || /^(system|auto)$/i.test(selected) ? snapshot?.resolved : selected)
+  if (selected && !/^(system|auto)$/i.test(selected)) return normalizeLanguage(selected)
+  const resolved = snapshot?.resolved
+  // Device represents its default English language with an empty string.
+  if (typeof resolved === 'string' && !resolved.trim()) return 'en'
+  return normalizeLanguage(resolved)
 }
 
 function stateFile(dataDir) { return path.join(dataDir, 'language-state.json') }

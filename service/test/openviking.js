@@ -174,7 +174,9 @@ test('license endpoint offers the AGPL-3.0 source location regardless of backend
 })
 
 test('device health reflects backend readiness; boot catalogues retain wire shapes', async () => {
-  assert.equal((await request('GET', '/healthz')).body.backend, 'openviking')
+  const health = await request('GET', '/healthz')
+  assert.equal(health.status, 200)
+  assert.deepEqual(health.body, { status: 'ok', backend: 'openviking', capabilities: { projectMemoryTags: true } })
   assert.equal((await request('GET', '/readyz')).body.ready, true)
   ready = false
   assert.equal((await request('GET', '/readyz')).status, 503)
@@ -786,6 +788,46 @@ test('dual matches use one budget slot and keyword pool is capped before cross-b
   assert.ok(hits[0].content.includes('summary') && hits[0].content.includes('shared evidence'))
   assert.equal(hits.filter(h=>h.uri===semantic[0].uri).length,1)
   assert.ok(!hits.some(h=>h.uri===matches[10].uri))
+})
+
+test('default hybrid budget preserves keyword match lines alongside a clipped semantic summary', () => {
+  const semantic = Array.from({ length: 10 }, (_, i) => ({
+    uri: `viking://user/test/memories/s${i}.md`, abstract: 'Semantic summary. '.repeat(100), score: 0.9, level: 2,
+  }))
+  const matches = [
+    { uri: semantic[0].uri, line: 7, content: 'Exact keyword match: rollout procedure' },
+    { uri: semantic[0].uri, line: 12, content: 'Exact keyword match: rollback procedure' },
+  ]
+  const hits = mergeSearch(semantic, matches)
+  assert.equal(hits.length, 10)
+  const [dual] = hits
+  assert.deepEqual(dual.retrievalSources, ['semantic', 'keyword'])
+  assert.ok(dual.content.startsWith('[Semantic]\nSemantic summary. '))
+  assert.ok(dual.content.endsWith('\n[Keyword]\n[L2 line 7] Exact keyword match: rollout procedure\n[L2 line 12] Exact keyword match: rollback procedure'))
+  assert.equal(dual.abstract, dual.content)
+  assert.equal(dual.truncated, true)
+  assert.ok(dual.truncationNotice)
+  assert.ok(hits.reduce((sum, hit) => sum + hit.content.length, 0) <= 8000)
+})
+
+test('dual previews respect tiny budgets and let a short semantic section keep its text', () => {
+  const semantic = [{ uri, abstract: 'Summary', score: 0.9, level: 2 }]
+  const matches = [{ uri, line: 1, content: 'Keyword match. '.repeat(100) }]
+  const headerLength = '[Semantic]\n\n[Keyword]\n'.length
+  for (const maxChars of [1, headerLength, headerLength + 1]) {
+    const [dual] = mergeSearch(semantic, matches, { maxChars })
+    assert.ok(dual.content.length <= maxChars)
+    assert.equal(dual.truncated, true)
+    assert.ok(dual.truncationNotice)
+  }
+  const [minimal] = mergeSearch(semantic, matches, { maxChars: headerLength + 2 })
+  assert.equal(minimal.content, '[Semantic]\n…\n[Keyword]\n…')
+  const [dual] = mergeSearch(semantic, matches, { maxChars: 80 })
+  assert.ok(dual.content.startsWith('[Semantic]\nSummary\n[Keyword]\n[L2 line 1] Keyword match. '))
+  assert.ok(dual.content.endsWith(TRUNCATION_MARKER))
+  assert.equal(dual.content.length, 80)
+  assert.equal(dual.truncated, true)
+  assert.ok(dual.truncationNotice)
 })
 
 

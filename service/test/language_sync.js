@@ -55,11 +55,24 @@ test('explicit language wins; system/auto use the OS tag; only valid tags cross 
   for (const ui of ['system', 'SYSTEM', 'auto', '']) {
     assert.equal(resolveLanguage({ ui, resolved: 'en_US' }), 'en-US')
     assert.equal(resolveLanguage({ ui, resolved: 'ja-JP' }), 'ja-JP')
+    assert.equal(resolveLanguage({ ui, resolved: ' \t' }), 'en')
+    for (const resolved of [undefined, null, 5]) {
+      assert.throws(() => resolveLanguage({ ui, resolved }), /Missing or invalid language tag/)
+    }
   }
   for (const code of ['en', 'ja', 'ko', 'es', 'fr', 'de', 'ru', 'pt', 'it', 'ar', 'id', 'sv', 'kn']) assert.equal(normalizeLanguage(code), code)
   assert.equal(normalizeLanguage('zh-Hant-TW'), 'zh-Hant-TW')
   for (const value of ['', 'system', 'auto', 'English', 'English please', 5, null]) assert.throws(() => normalizeLanguage(value))
-  assert.throws(() => resolveLanguage({ ui: 'system', resolved: '' }))
+})
+
+test('fresh startup applies the default English snapshot and becomes ready', async t => {
+  const f = await fixture(t, { snapshot: { ui: 'system', resolved: '' } })
+  assert.equal(readLanguageState(f.dataDir), null)
+  f.sync.start()
+  await until(() => f.sync.status().ready)
+  assert.equal(f.sync.status().language, 'en')
+  assert.deepEqual(f.applied, ['en'])
+  assert.equal(readLanguageState(f.dataDir), 'en')
 })
 
 test('initial snapshot, split SSE frames, polling recovery and duplicate suppression', async t => {
@@ -86,11 +99,12 @@ test('initial snapshot, split SSE frames, polling recovery and duplicate suppres
 })
 
 test('unavailable or unresolved source does not silently choose the Memory host language', async t => {
-  const f = await fixture(t, { snapshot: { ui: 'system', resolved: '' } })
+  const f = await fixture(t, { snapshot: { ui: 'system' } })
   f.sync.start()
-  await until(() => f.gets() >= 2)
+  await until(() => f.gets() >= 2 && f.sync.status().error === 'Missing or invalid language tag')
   assert.equal(f.sync.status().ready, false)
   assert.equal(f.applied.length, 0)
+  assert.equal(readLanguageState(f.dataDir), null)
   await assert.rejects(f.sync.run(() => assert.fail()), { code: 'language_pending' })
   f.change({ ui: 'en', resolved: '' })
   await until(() => f.sync.status().ready)
