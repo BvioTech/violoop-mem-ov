@@ -104,7 +104,7 @@ test('pending remote work does not hold the local BGE queue', async t => {
 test('remote failures never fall back to local; malformed vectors and timeouts fail', async t => {
   let mode = 'http'; let localCalls = 0
   const { migrationEmbedder } = await fixture(t, (_req, res) => {
-    if (mode === 'http') { res.statusCode = 401; res.end('private provider error'); return }
+    if (mode === 'http') { res.statusCode = 401; res.end('Bearer bridge-key'); return }
     if (mode === 'invalid') { res.end(JSON.stringify({ data: [{ index: 0, embedding: [1] }] })); return }
     if (mode === 'hang') return
     reply(res)
@@ -115,11 +115,40 @@ test('remote failures never fall back to local; malformed vectors and timeouts f
     assert.equal(response.status, mode === 'http' ? 401 : 503)
     const body = await response.json()
     assert.ok(!JSON.stringify(body).includes('bridge-key'))
-    assert.ok(!JSON.stringify(body).includes('private provider error'))
   }
   assert.equal(localCalls, 0)
   assert.equal((await post('normal')).status, 200)
   assert.equal(localCalls, 1)
+})
+
+test('migration forwards bounded 4xx classification detail with credentials removed', async t => {
+  const cases = [
+    [400, JSON.stringify({ error: {
+      code: '20015', message: 'Invalid parameter\napi_key="upstream-secret" Bearer sk-cloud-key ' + 'x'.repeat(500),
+    }, secret: 'ignored-field' }), /"code": 20015.*Invalid parameter/],
+    [400, JSON.stringify({ message: 'Input exceeds the context length\u0000', code: 'context_length_exceeded' }),
+      /context_length_exceeded.*Input exceeds the context length/],
+    [429, 'Provider quota depleted. Authorization: Bearer bridge-key', /Provider quota depleted/],
+    [429, JSON.stringify({ code: 'AccountQuotaExceeded' }), /AccountQuotaExceeded/],
+    [400, '<html>private provider markup</html>', /^Migration embedding service returned HTTP 400$/],
+    [413, 'private provider body '.repeat(50000), /^Migration embedding service returned HTTP 413$/],
+    [500, JSON.stringify({ message: 'private provider error' }), /^Migration embedding service returned HTTP 500$/],
+  ]
+  let current
+  const { migrationEmbedder } = await fixture(t, (_req, res) => {
+    res.statusCode = current[0]
+    res.end(current[1])
+  })
+  const post = await gatewayFor(t, migrationEmbedder, async () => assert.fail('unexpected local fallback'))
+  for (current of cases) {
+    const [status, , expected] = current
+    const response = await post('migration', { 'x-violoop-legacy-migration': '1' })
+    assert.equal(response.status, status < 500 ? status : 503)
+    const { error } = await response.json()
+    assert.match(error.message, expected)
+    assert.ok(error.message.length < 320)
+    assert.doesNotMatch(error.message, /[\u0000-\u001f]|bridge-key|upstream-secret|sk-cloud-key|ignored-field|private provider/)
+  }
 })
 
 test('remote migration requires a native runtime advertising the routing capability', async t => {

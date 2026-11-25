@@ -105,7 +105,7 @@ content_template: |
 embedding_template: |-
   EventName: {{ event_name }}
   Goal: {{ goal }}
-  {{ content }}
+  Summary: {{ summary }}
 overview_template: |-
   # Events Overview
   {% for item in items %}

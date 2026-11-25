@@ -71,7 +71,13 @@ from openviking.utils.circuit_breaker import (
     classify_api_error,
 )
 from openviking.utils.ingest_options import IngestOptions
-from openviking.utils.model_retry import ERROR_CLASS_INPUT_TOO_LARGE, ERROR_CLASS_PERMANENT
+from openviking.utils.model_retry import (
+    ERROR_CLASS_AUTH,
+    ERROR_CLASS_CONTENT_SAFETY,
+    ERROR_CLASS_INPUT_TOO_LARGE,
+    ERROR_CLASS_PERMANENT,
+    ERROR_CLASS_QUOTA_EXCEEDED,
+)
 from openviking_cli.session.user_id import UserIdentifier
 from openviking_cli.utils import VikingURI
 from openviking_cli.utils.config import get_openviking_config
@@ -751,29 +757,28 @@ class SemanticProcessor(DequeueHandlerBase):
                 return ProcessResult.failed(str(e))
 
             error_class = classify_api_error(e)
-            if error_class == ERROR_CLASS_INPUT_TOO_LARGE:
+            if error_class in (
+                ERROR_CLASS_AUTH,
+                ERROR_CLASS_CONTENT_SAFETY,
+                ERROR_CLASS_INPUT_TOO_LARGE,
+                ERROR_CLASS_PERMANENT,
+                ERROR_CLASS_QUOTA_EXCEEDED,
+            ):
                 execute_status = "error"
-                logger.error(
-                    f"Input too large processing semantic message, dropping: {e}",
-                    exc_info=True,
-                )
-                if msg is not None:
-                    self._merge_request_stats(msg.telemetry_id, error_count=1)
-                    get_request_wait_tracker().mark_semantic_failed(
-                        msg.telemetry_id, msg.id, str(e)
-                    )
-                if msg is not None:
-                    await self._cleanup_local_artifact(msg)
-                return ProcessResult.failed(str(e))
-            elif error_class == ERROR_CLASS_PERMANENT:
-                execute_status = "error"
-                logger.critical(
-                    f"Permanent error processing semantic message, dropping: {e}",
+                log = logger.critical if error_class == ERROR_CLASS_PERMANENT else logger.error
+                log(
+                    "%s error processing semantic message, dropping: %s",
+                    error_class,
+                    e,
                     exc_info=True,
                 )
                 # A malformed filesystem target does not indicate an API outage.
-                if breaker is not None and not any(
-                    isinstance(exc, AGFSNotADirectoryError) for exc in (e, e.__cause__)
+                if (
+                    breaker is not None
+                    and error_class in (ERROR_CLASS_PERMANENT, ERROR_CLASS_QUOTA_EXCEEDED)
+                    and not any(
+                        isinstance(exc, AGFSNotADirectoryError) for exc in (e, e.__cause__)
+                    )
                 ):
                     breaker.record_failure(e)
                 if msg is not None:
@@ -781,7 +786,6 @@ class SemanticProcessor(DequeueHandlerBase):
                     get_request_wait_tracker().mark_semantic_failed(
                         msg.telemetry_id, msg.id, str(e)
                     )
-                if msg is not None:
                     await self._cleanup_local_artifact(msg)
                 return ProcessResult.failed(str(e))
             else:

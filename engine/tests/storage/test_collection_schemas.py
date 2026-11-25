@@ -53,6 +53,7 @@ from openviking.storage.viking_vector_index_backend import (
     VikingVectorIndexBackend,
     _SingleAccountBackend,
 )
+from openviking.utils.model_retry import ERROR_CLASS_INPUT_TOO_LARGE, classify_api_error
 from openviking_cli.exceptions import InternalError
 from openviking_cli.utils.config.vectordb_config import (
     VectorDBBackendConfig,
@@ -1013,15 +1014,11 @@ async def test_embedding_handler_materialize_content_keeps_inline(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_embedding_handler_materialize_content_uses_preloaded_source(monkeypatch):
-    class _DummyVikingDB:
-        is_closing = False
-
     class _BrokenFS:
         async def read_file(self, uri, *, ctx):
             raise AssertionError(f"must not reread {uri}")
 
     monkeypatch.setattr("openviking.storage.viking_fs.get_viking_fs", lambda: _BrokenFS())
-    handler = TextEmbeddingHandler(_DummyVikingDB())
     msg = EmbeddingMsg(
         "embedding text",
         {
@@ -1035,7 +1032,7 @@ async def test_embedding_handler_materialize_content_uses_preloaded_source(monke
     )
     ctx = RequestContext(user=UserIdentifier("default", "default"), role=Role.ROOT)
 
-    assert await handler._materialize_content(msg, ctx) == "current body"
+    assert await ProductionTextEmbeddingHandler._materialize_content(msg, ctx) == "current body"
 
 
 @pytest.mark.asyncio
@@ -1116,28 +1113,31 @@ async def test_embedding_handler_truncates_queue_input_before_embed(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_embedding_handler_drops_input_too_large_without_requeue(monkeypatch):
+@pytest.mark.parametrize(
+    "provider_message",
+    [
+        "Malformed input request: expected maxLength: 50000, actual: 75000",
+        "Error code: 413 - Input length exceeds model context length",
+    ],
+)
+async def test_embedding_handler_drops_input_too_large_without_requeue(monkeypatch, provider_message):
     class _QueueingVikingDB:
         is_closing = False
         has_queue_manager = True
 
         def __init__(self):
             self.enqueued = []
+            self.upsert = AsyncMock(return_value="rec-1")
 
         async def enqueue_embedding_msg(self, msg):
             self.enqueued.append(msg)
             return None
 
-    class _OversizedInputEmbedder:
-        def prepare_embedding_input(self, content):
-            return content
-
+    class _OversizedInputEmbedder(_DummyEmbedder):
         def embed(self, text: str, is_query: bool = False) -> EmbedResult:
-            del text, is_query
-            raise RuntimeError("Malformed input request: expected maxLength: 50000, actual: 75000")
-
-        async def embed_async(self, text: str, is_query: bool = False) -> EmbedResult:
-            return self.embed(text, is_query=is_query)
+            if text == "oversized":
+                raise RuntimeError(provider_message)
+            return super().embed(text, is_query=is_query)
 
     vikingdb = _QueueingVikingDB()
     monkeypatch.setattr(
@@ -1147,17 +1147,23 @@ async def test_embedding_handler_drops_input_too_large_without_requeue(monkeypat
 
     handler = TextEmbeddingHandler(vikingdb)
 
-    result = await handler.on_dequeue(_build_queue_payload())
+    oversized_payload = _build_queue_payload()
+    data = json.loads(oversized_payload["data"])
+    data["payload"]["message"] = "oversized"
+    oversized_payload["data"] = json.dumps(data)
+    result = await handler.on_dequeue(oversized_payload)
 
+    assert classify_api_error(RuntimeError(provider_message)) == ERROR_CLASS_INPUT_TOO_LARGE
     assert result.outcome is ProcessOutcome.FAILED
     assert result.value is None
     assert result.error == (
-        "Failed to generate embedding: "
-        "Malformed input request: expected maxLength: 50000, actual: 75000 "
-        "(uri=viking://resources/sample)"
+        f"Failed to generate embedding: {provider_message} (uri=viking://resources/sample)"
     )
-    assert vikingdb.enqueued == []
+    vikingdb.upsert.assert_not_awaited()
     assert (await handler.breaker())._failure_count == 0
+    assert (await handler.on_dequeue(_build_queue_payload())).outcome is ProcessOutcome.SUCCESS
+    vikingdb.upsert.assert_awaited_once()
+    assert vikingdb.enqueued == []
 
 
 @pytest.mark.asyncio

@@ -6,15 +6,19 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from openviking.message import Message
+from openviking.message.part import TextPart
 from openviking.prompts.manager import PromptManager
 from openviking.session.memory.dataclass import MemoryField, MemoryFile
 from openviking.session.memory.experience_lineage import experience_source_tag
 from openviking.session.memory.memory_type_registry import MemoryTypeRegistry
-from openviking.session.memory.memory_updater import MemoryUpdater, MemoryUpdateResult
+from openviking.session.memory.memory_updater import ExtractContext, MemoryUpdater, MemoryUpdateResult
 from openviking.session.memory.merge_op import MergeOp
 from openviking.session.memory.merge_op.base import FieldType
 from openviking.session.memory.utils.memory_file_utils import MemoryFileUtils
+from openviking.storage.collection_schemas import TextEmbeddingHandler
 from openviking.storage.queuefs.embedding_msg_converter import EmbeddingMsgConverter
+from openviking.storage.queuefs.process_result import ProcessOutcome
 from openviking.utils.ingest_options import IngestOptions
 
 
@@ -38,7 +42,7 @@ class TestEmbeddingTemplateYamlParsing:
         schema = self.registry.get("events")
         assert (
             schema.embedding_template
-            == "EventName: {{ event_name }}\nGoal: {{ goal }}\n{{ content }}"
+            == "EventName: {{ event_name }}\nGoal: {{ goal }}\nSummary: {{ summary }}"
         )
 
     def test_preferences_exposes_embedding_template(self):
@@ -102,6 +106,75 @@ class TestContentTemplateRendering:
 
 
 class TestEmbeddingTextConstruction:
+    @pytest.mark.asyncio
+    async def test_long_event_chatlog_is_persisted_and_event_fields_are_indexed(
+        self, service, request_context
+    ):
+        registry = MemoryTypeRegistry(load_schemas=False)
+        memory_dir = PromptManager._get_bundled_templates_dir() / "memory"
+        registry.load_from_yaml(str(memory_dir / "events.yaml"))
+        uri = "viking://user/default/memories/events/release_approved.md"
+        original = "Original release discussion. " * 1700 + "End of discussion."
+        confirmation = "Approved for Friday."
+        extract_context = ExtractContext(
+            [
+                Message("user", "user", [TextPart(original)], created_at="2026-11-20T08:30:00"),
+                Message(
+                    "assistant",
+                    "assistant",
+                    [TextPart(confirmation)],
+                    created_at="2026-11-20T08:31:00",
+                ),
+            ],
+        )
+        event_file = MemoryFile(
+            uri=uri,
+            memory_type="events",
+            content="",
+            extra_fields={
+                "event_name": "release_approved",
+                "goal": "Confirm release",
+                "summary": "The team approved the Friday release.",
+                "ranges": f"0-{len(extract_context.messages) - 1}",
+            },
+        )
+        fs = service.viking_fs
+        db = service.vikingdb_manager
+        await fs.write_file(
+            uri,
+            MemoryFileUtils.write(
+                event_file,
+                content_template=registry.get("events").content_template,
+                extract_context=extract_context,
+            ),
+            ctx=request_context,
+        )
+        stored = MemoryFileUtils.read(await fs.read_file(uri, ctx=request_context), uri=uri)
+        assert "ChatLog:" in stored.content
+        assert original in stored.content
+        assert confirmation in stored.content
+
+        updater = MemoryUpdater(registry=registry, vikingdb=db)
+        result = MemoryUpdateResult()
+        result.add_written(uri)
+        with patch.object(
+            db, "enqueue_embedding_msg", new_callable=AsyncMock, return_value=True
+        ) as enqueue:
+            await updater._vectorize_memories(
+                result, request_context, extract_context, uri_memory_type_map={uri: "events"}
+            )
+            enqueue.assert_awaited_once()
+        message = enqueue.await_args.args[0]
+        assert message.message == (
+            "EventName: release_approved\nGoal: Confirm release\n"
+            "Summary: The team approved the Friday release."
+        )
+        handler = TextEmbeddingHandler(db, service.embedding_provider)
+        indexed = await handler.on_dequeue({"data": message.to_json()})
+        assert indexed.outcome is ProcessOutcome.SUCCESS
+        records = await db.get_context_by_uri(uri, level=2, ctx=request_context)
+        assert len(records) == 1
+
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("tags", "mode", "expected_mode"),

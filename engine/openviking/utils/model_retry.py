@@ -88,6 +88,8 @@ INPUT_TOO_LARGE_PATTERNS = (
     "max input tokens",
     "too many input tokens",
     "input length exceeds",
+    "context length exceeded",
+    "context_length_exceeded",
     "exceeds the context length",
     "exceeds the max input length",
     "is too large to process",
@@ -101,7 +103,7 @@ INPUT_TOO_LARGE_PATTERNS = (
     'code": 20015',
 )
 
-PERMANENT_API_ERROR_PATTERNS = ("400",)
+PERMANENT_API_ERROR_PATTERNS = ("400", "404", "422")
 
 # Credential-level errors: in multi-credential mode these advance to the next
 # credential (another key may be valid / have permission / have balance); with a
@@ -128,6 +130,7 @@ CONTENT_SAFETY_PATTERNS = (
 
 QUOTA_EXCEEDED_PATTERNS = (
     "quotaexceeded",  # also 429
+    "quota_exceeded",
     "quota limit",
     "quota exceed",
     "usage quota",
@@ -243,6 +246,8 @@ def classify_api_error(error: Exception) -> str:
         for pattern in INPUT_TOO_LARGE_PATTERNS:
             if _pattern_matches(text_lower, text_compact, pattern):
                 return ERROR_CLASS_INPUT_TOO_LARGE
+        if "context length" in text_lower and _get_numeric_pattern_re("400").search(text_lower):
+            return ERROR_CLASS_INPUT_TOO_LARGE
 
     # Content safety before permanent so a moderation message containing "400"
     # is not misclassified as a permanent parameter error.
@@ -274,6 +279,8 @@ def classify_api_error(error: Exception) -> str:
         for pattern in QUOTA_EXCEEDED_PATTERNS:
             if pattern in text_lower:
                 return ERROR_CLASS_QUOTA_EXCEEDED
+        if _get_numeric_pattern_re("429").search(text_lower) and re.search(r"\bquota\b", text_lower):
+            return ERROR_CLASS_QUOTA_EXCEEDED
 
     for text in texts:
         text_lower = text.lower()

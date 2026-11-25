@@ -176,9 +176,9 @@ def test_auth_takes_precedence_over_quota():
 # --- permanent vs auth split (400 vs 401/403) ---
 
 
-def test_classify_400_is_permanent():
-    """A 400 parameter error is request-level permanent (fail-fast)."""
-    error = RuntimeError("Error code: 400 - invalid parameter `model`")
+@pytest.mark.parametrize("status", [400, 404, 422])
+def test_classify_request_errors_as_permanent(status):
+    error = RuntimeError(f"Error code: {status} - invalid request")
     assert classify_api_error(error) == ERROR_CLASS_PERMANENT
 
 
@@ -266,6 +266,10 @@ def test_quota_exceeded_case_insensitive():
             "and text exceed max message tokens."
         ),
         "Error code: 413 - Payload Too Large",
+        "Input length exceeds model context length",
+        "Error code: 413 - {'message': 'Input length exceeds model context length'}",
+        "Error code: 400 - Migration embedding service returned HTTP 400: context_length_exceeded",
+        "Migration embedding service returned HTTP 400: Invalid context length for this model",
         (
             "Error code: 500 - {'error': {'code': 500, 'message': "
             "'input (8525 tokens) is too large to process. increase the physical batch size "

@@ -22,6 +22,12 @@ from openviking.storage.queuefs.semantic_processor import SemanticProcessor
 from openviking.storage.viking_fs import SyncDiff
 from openviking.telemetry.request_wait_tracker import get_request_wait_tracker
 from openviking.utils.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
+from openviking.utils.model_retry import (
+    ERROR_CLASS_AUTH,
+    ERROR_CLASS_CONTENT_SAFETY,
+    ERROR_CLASS_QUOTA_EXCEEDED,
+    classify_api_error,
+)
 
 
 @pytest.fixture
@@ -262,6 +268,45 @@ async def test_permanent_api_error_still_opens_breaker(semantic_env):
     await _assert_request_failed(env, msg, error)
     with pytest.raises(CircuitBreakerOpen):
         env.processor._account_breaker(msg.account_id).check()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "expected_class"),
+    [
+        ("401 invalid credential", ERROR_CLASS_AUTH),
+        ("400 content policy rejected the request", ERROR_CLASS_CONTENT_SAFETY),
+        (
+            "Migration embedding service returned HTTP 429: Provider quota depleted",
+            ERROR_CLASS_QUOTA_EXCEEDED,
+        ),
+    ],
+)
+async def test_terminal_api_error_cleans_artifact_and_finishes_request(
+    semantic_env, message, expected_class
+):
+    env = semantic_env
+    msg = env.message()
+    error = RuntimeError(message)
+    env.dag.run.side_effect = error
+    env.processor._cleanup_local_artifact = AsyncMock()
+    breaker = CircuitBreaker(failure_threshold=1)
+    env.processor._circuit_breakers[msg.account_id] = breaker
+
+    result = await asyncio.wait_for(env.processor.on_dequeue(msg.to_dict()), timeout=1)
+
+    assert classify_api_error(error) == expected_class
+    assert result.outcome is ProcessOutcome.FAILED
+    assert result.error == message
+    env.retry_queue.enqueue.assert_not_awaited()
+    env.processor._cleanup_local_artifact.assert_awaited_once()
+    assert env.processor._cleanup_local_artifact.await_args.args[0].id == msg.id
+    await _assert_request_failed(env, msg, error)
+    if expected_class == ERROR_CLASS_QUOTA_EXCEEDED:
+        with pytest.raises(CircuitBreakerOpen):
+            breaker.check()
+    else:
+        breaker.check()
 
 
 @pytest.mark.asyncio
