@@ -131,8 +131,12 @@ CONTENT_SAFETY_PATTERNS = (
 QUOTA_EXCEEDED_PATTERNS = (
     "quotaexceeded",  # also 429
     "quota_exceeded",
+    "insufficient_quota",
+    "exceeded your current quota",
     "quota limit",
     "quota exceed",
+    "quota depleted",
+    "quota exhausted",
     "usage quota",
 )
 
@@ -279,8 +283,6 @@ def classify_api_error(error: Exception) -> str:
         for pattern in QUOTA_EXCEEDED_PATTERNS:
             if pattern in text_lower:
                 return ERROR_CLASS_QUOTA_EXCEEDED
-        if _get_numeric_pattern_re("429").search(text_lower) and re.search(r"\bquota\b", text_lower):
-            return ERROR_CLASS_QUOTA_EXCEEDED
 
     for text in texts:
         text_lower = text.lower()

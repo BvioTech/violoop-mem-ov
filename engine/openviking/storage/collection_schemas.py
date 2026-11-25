@@ -52,8 +52,10 @@ from openviking.utils.circuit_breaker import (
 from openviking.utils.log_correlation import log_correlation
 from openviking.utils.model_retry import (
     ERROR_CLASS_AUTH,
+    ERROR_CLASS_CONTENT_SAFETY,
     ERROR_CLASS_INPUT_TOO_LARGE,
     ERROR_CLASS_PERMANENT,
+    ERROR_CLASS_QUOTA_EXCEEDED,
 )
 from openviking.utils.tags import merge_search_tags
 from openviking.utils.time_utils import get_current_timestamp
@@ -807,6 +809,13 @@ class TextEmbeddingHandler(DequeueHandlerBase):
                             request_failed_message = error_msg
                             return ProcessResult.failed(error_msg)
 
+                        if error_class == ERROR_CLASS_CONTENT_SAFETY:
+                            execute_status = "error"
+                            self._log_embedding_error(logging.ERROR, error_msg, embedding_msg)
+                            self._merge_request_stats(embedding_msg.telemetry_id, error_count=1)
+                            request_failed_message = error_msg
+                            return ProcessResult.failed(error_msg)
+
                         if error_class == ERROR_CLASS_PERMANENT:
                             execute_status = "error"
                             self._log_embedding_error(logging.CRITICAL, error_msg, embedding_msg)
@@ -822,6 +831,13 @@ class TextEmbeddingHandler(DequeueHandlerBase):
                             # add-resource --wait open. Don't trip the breaker: an open
                             # breaker re-enqueues later messages and reintroduces the
                             # same leak. See #2916.
+                            self._log_embedding_error(logging.ERROR, error_msg, embedding_msg)
+                            self._merge_request_stats(embedding_msg.telemetry_id, error_count=1)
+                            request_failed_message = error_msg
+                            return ProcessResult.failed(error_msg)
+
+                        if error_class == ERROR_CLASS_QUOTA_EXCEEDED:
+                            execute_status = "error"
                             self._log_embedding_error(logging.ERROR, error_msg, embedding_msg)
                             self._merge_request_stats(embedding_msg.telemetry_id, error_count=1)
                             request_failed_message = error_msg

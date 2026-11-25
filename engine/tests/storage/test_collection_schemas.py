@@ -53,7 +53,12 @@ from openviking.storage.viking_vector_index_backend import (
     VikingVectorIndexBackend,
     _SingleAccountBackend,
 )
-from openviking.utils.model_retry import ERROR_CLASS_INPUT_TOO_LARGE, classify_api_error
+from openviking.utils.model_retry import (
+    ERROR_CLASS_CONTENT_SAFETY,
+    ERROR_CLASS_INPUT_TOO_LARGE,
+    ERROR_CLASS_QUOTA_EXCEEDED,
+    classify_api_error,
+)
 from openviking_cli.exceptions import InternalError
 from openviking_cli.utils.config.vectordb_config import (
     VectorDBBackendConfig,
@@ -1164,6 +1169,95 @@ async def test_embedding_handler_drops_input_too_large_without_requeue(monkeypat
     assert (await handler.on_dequeue(_build_queue_payload())).outcome is ProcessOutcome.SUCCESS
     vikingdb.upsert.assert_awaited_once()
     assert vikingdb.enqueued == []
+
+
+@pytest.mark.asyncio
+async def test_embedding_handler_drops_migration_content_safety_without_requeue_or_breaker(
+    monkeypatch,
+):
+    provider_message = (
+        "Error code: 400 - Migration embedding service returned HTTP 400: "
+        "content policy rejected the request"
+    )
+
+    class _QueueingVikingDB:
+        is_closing = False
+        has_queue_manager = True
+
+        def __init__(self):
+            self.enqueued = []
+            self.upsert = AsyncMock(return_value="rec-1")
+
+        async def enqueue_embedding_msg(self, msg):
+            self.enqueued.append(msg)
+            return None
+
+    class _ContentSafetyEmbedder(_DummyEmbedder):
+        def embed(self, text: str, is_query: bool = False) -> EmbedResult:
+            if text == "blocked-by-policy":
+                raise RuntimeError(provider_message)
+            return super().embed(text, is_query=is_query)
+
+    vikingdb = _QueueingVikingDB()
+    monkeypatch.setattr(
+        "openviking_cli.utils.config.get_openviking_config",
+        lambda: _DummyConfig(_ContentSafetyEmbedder()),
+    )
+
+    handler = TextEmbeddingHandler(vikingdb)
+
+    blocked_payload = _build_queue_payload()
+    data = json.loads(blocked_payload["data"])
+    data["payload"]["message"] = "blocked-by-policy"
+    blocked_payload["data"] = json.dumps(data)
+
+    result = await handler.on_dequeue(blocked_payload)
+
+    assert classify_api_error(RuntimeError(provider_message)) == ERROR_CLASS_CONTENT_SAFETY
+    assert result.outcome is ProcessOutcome.FAILED
+    assert result.value is None
+    assert vikingdb.enqueued == []
+    vikingdb.upsert.assert_not_awaited()
+    breaker = await handler.breaker()
+    assert breaker._failure_count == 0
+    breaker.check()
+    assert (await handler.on_dequeue(_build_queue_payload())).outcome is ProcessOutcome.SUCCESS
+    vikingdb.upsert.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_embedding_handler_drops_quota_exceeded_without_requeue(monkeypatch):
+    provider_message = "Error code: 429 - AccountQuotaExceeded"
+
+    class _QueueingVikingDB:
+        is_closing = False
+        has_queue_manager = True
+
+        def __init__(self):
+            self.enqueued = []
+            self.upsert = AsyncMock(return_value="rec-1")
+
+        async def enqueue_embedding_msg(self, msg):
+            self.enqueued.append(msg)
+            return None
+
+    class _QuotaEmbedder(_DummyEmbedder):
+        def embed(self, text: str, is_query: bool = False) -> EmbedResult:
+            raise RuntimeError(provider_message)
+
+    vikingdb = _QueueingVikingDB()
+    monkeypatch.setattr(
+        "openviking_cli.utils.config.get_openviking_config",
+        lambda: _DummyConfig(_QuotaEmbedder()),
+    )
+
+    handler = TextEmbeddingHandler(vikingdb)
+    result = await handler.on_dequeue(_build_queue_payload())
+
+    assert classify_api_error(RuntimeError(provider_message)) == ERROR_CLASS_QUOTA_EXCEEDED
+    assert result.outcome is ProcessOutcome.FAILED
+    assert vikingdb.enqueued == []
+    vikingdb.upsert.assert_not_awaited()
 
 
 @pytest.mark.asyncio
