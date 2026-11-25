@@ -29,7 +29,7 @@ memory_execute({code: `
 - delete 只接受明确的单个 .md 文件，原生 recursive=false。目录、隐藏文件、越界路径、其他用户及其他 peer 的路径均拒绝。旧 graph.db 不参与这些操作。
 - 适配器串行处理同一文件的工具修改；这不是与原生后台抽取共享的 compare-and-swap 事务。编辑前读取最新内容，冲突时重新读取。
 - 写入和删除使用原生 content/write 和 fs 接口，刷新摘要、索引或清理向量。返回的 `result` 原样保留 vector_status、overview_status、semantic_status、queue_status 等实际字段；queued 不代表索引处理完成。
-- 超时、网络中断或原生 5xx 可能发生在正文已写入之后。`delivery_uncertain:true` 表示程序内后续写入已阻断，重试前先读取当前文件。
+- 参数校验通过的写入会在 `steps` 中记录目标 `key` 和派发状态 `write_dispatched`。超时、网络中断或原生 5xx 可能发生在正文已写入之后。若结果返回 `delivery_uncertain: true`，程序内后续写入已阻断。找到同样标记 `delivery_uncertain: true` 的步骤，在新调用中用 `mem.get({key})` 读取该目标，再决定是否重试。
 
 对应 HTTP：`POST /v1/memories` 接收 `{key,content,tags?}`；`PATCH /v1/memories/{encoded URI}` 接收 `{oldText,newText,tags?}`；`DELETE /v1/memories/{encoded URI}` 删除文件。旧 PUT/树记忆接口不变。
 
