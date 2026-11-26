@@ -61,7 +61,7 @@
           "path": "embedder.js",
           "sha256": "eccfd770d1f88ac7076045fe0fb9d8473d6c087f29d3a970932848979846313f",
           "destination": "service/embedder.js",
-          "integration_sha256": "d1a1f0ab67e321547f504da015a9fc30da6c44c6e3a782edc05152c1b553283f"
+          "integration_sha256": "646d605d2c60f955d9e7ccafa0425d17b049e059692ee567b57a828d464e6952"
         },
         {
           "path": "event_time_decay.js",
@@ -100,7 +100,7 @@
           "path": "migration_embedding.js",
           "sha256": "e412e6917c80e767a8467c8b41fdaf3e139a69fad6a927a60027f7f9e9b5004c",
           "destination": "service/migration_embedding.js",
-          "integration_sha256": "cde8ea5b78e1f60c9c1306bc88423c209cfbca1dd6fb0769cdeba630df239f9d"
+          "integration_sha256": "d98177d1affa4ca7bdc13854b9bdd1205cfe15c48ec13854b49f31b8f238f888"
         },
         {
           "path": "migration_timing.js",
@@ -111,7 +111,7 @@
           "path": "model_gateway.js",
           "sha256": "a2dac026280376e24c4df78f211c04554ed87f6e8fd3747f33d7a6007cb5f1a0",
           "destination": "service/model_gateway.js",
-          "integration_sha256": "7e6e87b2e1b7ff0806ae3a836f7f49d4986bbb9149999b72947e7b782bd0cfb6"
+          "integration_sha256": "a1bf989fbe2136b89e901c555c9ced4eef49a3bad5d2e5083f58698c20fdc9ac"
         },
         {
           "path": "openviking_adapter.js",
@@ -274,7 +274,7 @@
           "path": "test/migration_embedding.js",
           "sha256": "a4a61f028bd462e718606dc7c37bd58e4c1f00281b29d0bdadd289c942d48c6f",
           "destination": "service/test/migration_embedding.js",
-          "integration_sha256": "45d39a7d69c278e5c52682befbde71b2094f00d36ddf0d2c9dd9c33cfcc18697"
+          "integration_sha256": "a5175437d242365ac9ec9893a4291fc10f82e3bdb39c2df3bb886dbcbd637deb"
         },
         {
           "path": "test/migration_timing.js",
@@ -15920,7 +15920,8 @@
         {
           "path": "openviking/config/embedding.py",
           "sha256": "aa7ba3bbcd84499e650abe5b8b9b7b78ffb859922f89d678c985e5c73d7d4370",
-          "destination": "engine/openviking/config/embedding.py"
+          "destination": "engine/openviking/config/embedding.py",
+          "integration_sha256": "be959e1b8951082df58fc653152bf5097828ab59122b354b7499b81d15f1819c"
         },
         {
           "path": "openviking/config/feishu.py",
@@ -17495,7 +17496,8 @@
         {
           "path": "openviking/prompts/templates/memory/events.yaml",
           "sha256": "e98268d2dba74012f91ef9ecb6fd852f6aae1fe87b002c4f36b7a2e98f44e574",
-          "destination": "engine/openviking/prompts/templates/memory/events.yaml"
+          "destination": "engine/openviking/prompts/templates/memory/events.yaml",
+          "integration_sha256": "c7c6f47f2dccddf439c1ab1c2145d415b91569b4c21728a1820381bde1d25469"
         },
         {
           "path": "openviking/prompts/templates/memory/experiences.yaml",
@@ -18934,7 +18936,7 @@
           "path": "openviking/storage/collection_schemas.py",
           "sha256": "16f42a9392f536c8df81547d76058fc9f1f4c2e22d24855094371237a5b6eaa8",
           "destination": "engine/openviking/storage/collection_schemas.py",
-          "integration_sha256": "2ac492ed77ef66ed56509345048334b66e0286980b0f7d45c39ca20af3905fd7"
+          "integration_sha256": "65f69a79133db9fcaed2812514ef6cd28e5cca200094def55ec7216d6497b06e"
         },
         {
           "path": "openviking/storage/content_write.py",
@@ -19146,7 +19148,7 @@
           "path": "openviking/storage/queuefs/semantic_processor.py",
           "sha256": "6aaed614df4be024b57c5c2c8da97076764a6a95e82420e6eebfd38941d9116c",
           "destination": "engine/openviking/storage/queuefs/semantic_processor.py",
-          "integration_sha256": "cc004892117db56e1da6ca484ce903433773076a2027898b69c1aa60b08fbae9"
+          "integration_sha256": "d05a4e9426d490753a904747694d69b553afb54456cf93e0a6406299615ba6d9"
         },
         {
           "path": "openviking/storage/queuefs/semantic_queue.py",
@@ -19772,7 +19774,8 @@
         {
           "path": "openviking/utils/circuit_breaker.py",
           "sha256": "5727ab19f014a702d504224e248669b57ca08cdc72805c4e934d4743cb9e371e",
-          "destination": "engine/openviking/utils/circuit_breaker.py"
+          "destination": "engine/openviking/utils/circuit_breaker.py",
+          "integration_sha256": "f9e807dd7baa82d81c7534a6591641cbe430fcb83da3b56ae7809162051afaa3"
         },
         {
           "path": "openviking/utils/code_hosting_utils.py",
@@ -19852,7 +19855,8 @@
         {
           "path": "openviking/utils/model_retry.py",
           "sha256": "809e04969b7f3713448f7d4802953714cd9559cbe08c1d031f69617bc0d01ca8",
-          "destination": "engine/openviking/utils/model_retry.py"
+          "destination": "engine/openviking/utils/model_retry.py",
+          "integration_sha256": "7b3571fb48b887f0b1cacec00a954d741f2e6462a3d45005223900954f25acfc"
         },
         {
           "path": "openviking/utils/multimodal.py",
@@ -24034,7 +24038,8 @@
         {
           "path": "tests/storage/test_collection_schemas.py",
           "sha256": "8d91b12e5ba6c6bc1baa0089221cd772cbef530c5afdf6a978370efb098904a6",
-          "destination": "engine/tests/storage/test_collection_schemas.py"
+          "destination": "engine/tests/storage/test_collection_schemas.py",
+          "integration_sha256": "ecde8524093bc24eee950c53e527d3b4d6843a1c4088730369e5128413fb3392"
         },
         {
           "path": "tests/storage/test_content_write_processing_mode.py",
@@ -24206,7 +24211,8 @@
         {
           "path": "tests/storage/test_semantic_processor_permanent_storage_error.py",
           "sha256": "a2babde7ad11f573e9631d93878ebe0fdceaa4d0a3071e57bd026e40acf311b6",
-          "destination": "engine/tests/storage/test_semantic_processor_permanent_storage_error.py"
+          "destination": "engine/tests/storage/test_semantic_processor_permanent_storage_error.py",
+          "integration_sha256": "e9944b82bdd727d06b8f4b0653bd83478828ad8620045a93bef7b4a7e374df14"
         },
         {
           "path": "tests/storage/test_semantic_processor_target_preexisting.py",
@@ -24572,7 +24578,8 @@
         {
           "path": "tests/unit/session/memory/test_embedding_template.py",
           "sha256": "6bffe38378cf3e386efb1a089e47610e6100b9b426fd1f086d0bd6fe13dcc81a",
-          "destination": "engine/tests/unit/session/memory/test_embedding_template.py"
+          "destination": "engine/tests/unit/session/memory/test_embedding_template.py",
+          "integration_sha256": "c1f84e173a881fea6e5c6beaac22c11070ec690d88afbbfca3813a029c684280"
         },
         {
           "path": "tests/unit/session/memory/test_experience_lineage.py",
@@ -24975,7 +24982,8 @@
         {
           "path": "tests/unit/test_model_retry.py",
           "sha256": "313a292051be4ca0c8eaf9f435bab963ab7bb384cf53b906f42ebb95dce3d28c",
-          "destination": "engine/tests/unit/test_model_retry.py"
+          "destination": "engine/tests/unit/test_model_retry.py",
+          "integration_sha256": "b3b3af4c400933484097d82433c41cc4bb3db5dcab14544ae84e034a88d6ca0f"
         },
         {
           "path": "tests/unit/test_namespace_uri_classification.py",

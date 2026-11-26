@@ -47,23 +47,26 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
       res.on('close', () => { if (!res.writableEnded) abort.abort() })
       const timing = gatewayTiming(req, timingDir)
       if (req.url === '/v1/embeddings') {
-        const inputs = typeof body.input === 'string' ? [body.input] : body.input
-        if (body.model !== 'bge-m3' || !Array.isArray(inputs) || !inputs.length || inputs.length > 100
-          || inputs.some(s => typeof s !== 'string' || !s.length) || body.encoding_format === 'base64'
-          || (body.dimensions && body.dimensions !== 1024)) {
-          return json(res, 400, { error: { message: 'requires bge-m3, text input and 1024 float dimensions' } })
-        }
+        const inputs = typeof body?.input === 'string' ? [body.input] : body?.input
         const remote = Boolean(migrationEmbedder && req.headers['x-violoop-legacy-migration'] === '1')
         const backend = remote ? 'remote' : 'local'
         const selectedEmbedder = remote ? migrationEmbedder : embedder
+        const truncate = body?.truncate !== false
         const queue = queues[backend]
-        const query = body.input_type === 'query'
+        const query = body?.input_type === 'query'
         const measured = { queueMs: 0, computeMs: 0 }
         const started = Date.now(), requestId = crypto.randomUUID()
         let status = 'ok'
         const data = []
-        const inputChars = inputs.reduce((n, text) => n + text.length, 0)
+        const inputCount = Array.isArray(inputs) ? inputs.length : 0
+        let inputChars = 0
         try {
+          if (body?.model !== 'bge-m3' || !inputCount || inputCount > 100
+            || inputs.some(s => typeof s !== 'string' || !s.length) || body.encoding_format === 'base64'
+            || (body.dimensions && body.dimensions !== 1024)) {
+            throw Object.assign(new Error('requires bge-m3, text input and 1024 float dimensions'), { status: 400 })
+          }
+          inputChars = inputs.reduce((n, text) => n + text.length, 0)
           const queueDone = timing?.stage('bge.gateway_queue', { purpose: timing.purpose, inputCount: inputs.length, backend })
           const result = await queue.run(async () => {
             if (!data.length) queueDone?.()
@@ -71,7 +74,7 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
             if (res.destroyed) throw Object.assign(new Error('request cancelled'), { status: 499 })
             const done = timing?.stage('bge.compute', { purpose: timing.purpose, inputChars: input.length, backend })
             let vector
-            try { vector = await selectedEmbedder.embedQuery(input, { signal: abort.signal }) } catch (err) { done?.('error'); throw err }
+            try { vector = await selectedEmbedder.embedQuery(input, { signal: abort.signal, truncate }) } catch (err) { done?.('error'); throw err }
             done?.(vector ? 'ok' : 'unavailable')
             if (!vector || vector.length !== 1024 || !Array.from(vector).every(Number.isFinite)) {
               throw Object.assign(new Error('BGE embedding unavailable'), { status: 503 })
@@ -81,11 +84,11 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
           }, { query, signal: abort.signal, timing: measured })
           if (!res.destroyed) return json(res, 200, result)
         } catch (error) {
-          status = error.status || 'embedding_error'; throw error
+          status = error.status || 503; throw error
         }
         finally {
           console.info('[bge.request]', JSON.stringify({ requestId, backend, purpose: query ? 'query' : 'document',
-            inputCount: inputs.length, inputChars, embeddingChars: inputChars,
+            inputCount, inputChars, embeddingChars: inputChars,
             ...measured, elapsedMs: Date.now() - started, status }))
         }
         return
@@ -140,7 +143,9 @@ async function startModelGateway({ embedder, migrationEmbedder = null, token, de
       }
       return json(res, 404, { error: { message: 'not found' } })
     } catch (err) {
-      if (!res.destroyed) json(res, err.status || 503, { error: { message: err.message } })
+      if (!res.destroyed) json(res, err.status || 503, {
+        error: { message: err.message, ...(err.code ? { code: err.code } : {}) },
+      })
     }
   })
   await new Promise((resolve, reject) => {

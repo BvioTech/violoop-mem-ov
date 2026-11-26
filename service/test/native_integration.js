@@ -6,11 +6,14 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const http = require('http')
+const { execFile } = require('child_process')
+const { promisify } = require('util')
 const Database = require('better-sqlite3')
 const { createHash } = require('crypto')
 const serviceRoot = process.env.VIOLOOP_TEST_SERVICE_ROOT || path.join(__dirname, '..')
 const { start } = require(path.join(serviceRoot, 'server'))
 const { loadConfig } = require(path.join(serviceRoot, 'config'))
+const { Embedder } = require(path.join(serviceRoot, 'embedder'))
 const { linkedLegacyDatabase } = require('./fixtures/legacy')
 const digest = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 const wait = ms => new Promise(r => setTimeout(r, ms))
@@ -46,6 +49,144 @@ function request(socket, method, route, body) {
     req.on('error', reject); req.end(body === undefined ? undefined : JSON.stringify(body))
   })
 }
+
+// Write a legacy flat embedding message into real QueueFS without starting consumers.
+async function seedEmbeddingQueue({ dataDir, openviking }, phase) {
+  await promisify(execFile)(openviking.python, ['-c', `
+import asyncio
+import sys
+from openviking.core.context import Context, ContextLevel
+from openviking.storage.queuefs.named_queue import NamedQueue
+from openviking.utils.agfs_utils import RagfsBindingConfig, create_agfs_client
+from openviking_cli.utils.config import AGFSConfig
+
+async def seed(workspace, phase):
+    agfs = create_agfs_client(RagfsBindingConfig(agfs=AGFSConfig(path=workspace, backend="local")))
+    try:
+        queue = NamedQueue(agfs, "/queue", "Embedding")
+        parent = "viking://user/default/memories/events"
+        for kind, text in [
+            ("oversized", f"historical-{phase} ChatLog: " + "original discussion " * 2400),
+            ("next", f"following-{phase} event"),
+        ]:
+            ctx = Context(uri=f"{parent}/{phase}-{kind}.md", parent_uri=parent,
+                          is_leaf=True, context_type="memory", level=ContextLevel.DETAIL,
+                          abstract=text[:160], account_id="default")
+            await queue.enqueue({"id": f"{phase}-{kind}", "action": "upsert",
+                                 "message": text, "context_data": ctx.to_dict()})
+    finally:
+        agfs.close()
+
+asyncio.run(seed(*sys.argv[1:]))
+`, path.join(dataDir, 'openviking'), phase], {
+    cwd: dataDir,
+    env: { ...process.env, PYTHONPATH: openviking.pythonPath, PYTHONDONTWRITEBYTECODE: '1' },
+  })
+}
+
+test('persisted oversized embeddings drain at startup and during a language switch so recall recovers', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-ov-language-'))
+  const peers = new Set()
+  let language = 'en'
+  let service, hold
+  const device = http.createServer((req, res) => {
+    if (req.url === '/events') {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.write(': ready\n\n')
+      peers.add(res); res.on('close', () => peers.delete(res))
+    } else {
+      res.end(JSON.stringify(req.url === '/settings/language'
+        ? { ui: language, resolved: language } : { ready: true }))
+    }
+  })
+  await new Promise(resolve => device.listen(0, '127.0.0.1', resolve))
+  t.after(async () => {
+    hold?.resolve()
+    await service?.shutdown()
+    device.closeAllConnections(); await new Promise(resolve => device.close(resolve))
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  const socket = path.join(dir, 'mem.sock')
+  const config = loadConfig(['--socket', socket, '--data-dir', dir], {
+    OPENVIKING_URL: `http://127.0.0.1:${await port()}`,
+    OPENVIKING_DEVICE_MODEL_URL: `http://127.0.0.1:${device.address().port}/internal/memory/chat/completions`,
+    OPENVIKING_RUNTIME_DIR: path.join(dir, 'run'),
+    ...(process.env.VIOLOOP_TEST_PYTHON ? { OPENVIKING_PYTHON: process.env.VIOLOOP_TEST_PYTHON } : {}),
+    ...(process.env.VIOLOOP_TEST_PYTHONPATH ? { OPENVIKING_PYTHONPATH: process.env.VIOLOOP_TEST_PYTHONPATH } : {}),
+  })
+  const inputs = []
+  const evaluated = []
+  const embedder = new Embedder()
+  embedder.state = 'ready'
+  embedder.dim = 1024
+  embedder.profile = { id: 'bge-m3', query: input => input }
+  embedder._ctx = {
+    _llamaContext: { contextSize: 8192, model: { tokenizer(input) {
+      inputs.push(input)
+      if (input.startsWith('historical-startup')) return Array(9000).fill(3)
+      if (input.startsWith('historical-switch')) return Array(9000).fill(4)
+      return [/release schedule|friday release/i.test(input) ? 6 : 5]
+    } } },
+    async getEmbeddingFor(tokens) {
+      evaluated.push({ token: tokens[0], size: tokens.length })
+      if (tokens[0] === 3 || tokens[0] === 4) await hold.promise
+      if (tokens[0] === 3) throw Error('Input is longer than the context size')
+      assert.ok(tokens.length + 2 <= 8191)
+      const vector = new Float32Array(1024)
+      vector[tokens[0]] = 1
+      return { vector }
+    },
+    async dispose() {},
+  }
+  const recall = () => request(socket, 'POST', '/v2/recall', {
+    text: 'Friday release schedule', targetUri: 'viking://user/default/memories/entities/projects', level: 2,
+  })
+  const assertPending = () => assert.rejects(recall(), /503.*language_pending/)
+  const waitUntil = fn => until(fn, 15000)
+
+  await seedEmbeddingQueue(config, 'startup')
+  hold = Promise.withResolvers()
+  service = await start(config, { runtimeOptions: { embedder } })
+  await waitUntil(() => evaluated.some(call => call.token === 3) && peers.size)
+  await assertPending()
+  hold.resolve()
+  await waitUntil(() => service.language.status().ready && service.language.status().language === 'en')
+  const startup = (await service.client.waitProcessed()).Embedding
+  assert.equal(startup.error_count, 1)
+  assert.match(startup.errors[0].message, /413.*Input length exceeds model context length/)
+  assert.equal(startup.requeue_count, 0)
+  assert.equal(evaluated.filter(call => call.token === 3).length, 1)
+  assert.ok(inputs.includes('following-startup event'))
+
+  const memory = await request(socket, 'POST', '/v1/memory-entries', {
+    memoryType: 'entities', category: 'projects', name: 'release_schedule',
+    content: '# Release schedule\nThe Friday release is approved.',
+  })
+  await waitUntil(() => service.client.waitProcessed())
+  const assertRecalled = async () => {
+    const { results } = await recall()
+    assert.ok(results.some(hit => hit.uri === memory.uri), JSON.stringify(results))
+  }
+  await assertRecalled()
+
+  hold = Promise.withResolvers()
+  await seedEmbeddingQueue(config, 'switch')
+  await waitUntil(() => evaluated.some(call => call.token === 4))
+  language = 'ja'
+  for (const peer of peers) peer.write('data: ' + JSON.stringify({ type: 'settings:language', ui: language, resolved: language }) + '\n\n')
+  await waitUntil(() => service.language.status().desired === 'ja')
+  await assertPending()
+  hold.resolve()
+  await waitUntil(() => service.language.status().ready && service.language.status().language === 'ja')
+  const switched = (await service.client.waitProcessed()).Embedding
+  assert.equal(switched.error_count, startup.error_count)
+  assert.equal(switched.requeue_count, 0)
+  assert.deepEqual(evaluated.filter(call => call.token === 4), [{ token: 4, size: 8189 }])
+  assert.ok(inputs.includes('following-switch event'))
+  await assertRecalled()
+})
+
 test('managed native engine: auto migration, actual files/links, CRUD, retrieval, durable restart and source preservation', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vm-ov-native-'))
   let service

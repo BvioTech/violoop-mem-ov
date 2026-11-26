@@ -1,5 +1,36 @@
 // Migration embedding is forwarded to Device, which owns cloud credentials and renewal.
 const http = require('http')
+const MAX_ERROR_BODY_BYTES = 16 * 1024
+
+function errorDetail(bytes, token) {
+  const text = bytes.toString('utf8').trim()
+  let message, code
+  try {
+    const body = JSON.parse(text)
+    message = typeof body === 'string' && body.length <= 512 ? body : body?.error?.message ?? body?.message
+    code = body?.error?.code ?? body?.code
+  } catch {
+    if (text.length <= 512 && !/^[<{\[]/.test(text)) message = text
+  }
+  const sanitize = value => value
+    .replace(/[\p{Cc}\p{Cf}]+/gu, ' ')
+    .replace(/https?:\/\/\S+/gi, '[redacted URL]')
+    .replace(/\b(?:Bearer|Basic)\s+[^\s"',;}]+/gi, '[redacted authorization]')
+    .replace(/\b(?:authorization|(?:api|access)[-_ ]?key|(?:(?:access|refresh|session)[-_ ]?)?token|password|(?:client[-_ ]?)?secret)\b["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi, '[redacted credential]')
+    .replace(/\b(?:sk-|AKIA)[\w-]+/g, '[redacted key]')
+    .replace(/\beyJ[\w-]+\.[\w-]+\.[\w-]+/g, '[redacted token]')
+    .trim()
+    .slice(0, 240)
+  if (typeof message === 'string') message = sanitize(message.replaceAll(token, '[redacted]'))
+  // Keep the structured provider code recognizable to the Python error classifier.
+  const codeText = typeof code === 'number' || typeof code === 'string' ? String(code) : ''
+  let safeCode
+  if (/^[\w.-]{1,64}$/.test(codeText) && !codeText.includes(token) && sanitize(codeText) === codeText) {
+    safeCode = /^\d{1,9}$/.test(codeText) ? Number(codeText) : codeText
+  }
+  return [safeCode === undefined ? '' : '{"code": ' + JSON.stringify(safeCode) + '}',
+    typeof message === 'string' ? message : ''].filter(Boolean).join(' ')
+}
 
 function createMigrationEmbedder({ deviceModelUrl, token, timeoutMs = 60000 } = {}) {
   const endpoint = new URL(deviceModelUrl)
@@ -17,18 +48,27 @@ function createMigrationEmbedder({ deviceModelUrl, token, timeoutMs = 60000 } = 
         const request = http.request(endpoint, { method: 'POST', signal, headers: {
           authorization: `Bearer ${token}`, 'content-type': 'application/json', 'content-length': payload.length,
         } }, response => {
+          const status = response.statusCode
+          const clientError = status >= 400 && status < 500
           const chunks = []; let size = 0
           response.on('data', chunk => {
             size += chunk.length
-            if (size > 1024 * 1024) request.destroy(new Error('Migration embedding response is too large'))
-            else chunks.push(chunk)
+            if (status === 200) {
+              if (size > 1024 * 1024) request.destroy(new Error('Migration embedding response is too large'))
+              else chunks.push(chunk)
+            } else if (clientError && size <= MAX_ERROR_BODY_BYTES) {
+              chunks.push(chunk)
+            }
           })
           response.on('error', () => reject(new Error('Migration embedding response interrupted')))
           response.on('end', () => {
-            if (response.statusCode !== 200) return reject(Object.assign(
-              new Error(`Migration embedding service returned HTTP ${response.statusCode}`),
-              { status: response.statusCode >= 400 && response.statusCode < 500 ? response.statusCode : 503 },
-            ))
+            if (status !== 200) {
+              const detail = clientError && size <= MAX_ERROR_BODY_BYTES ? errorDetail(Buffer.concat(chunks), token) : ''
+              const message = `Migration embedding service returned HTTP ${status}`
+              return reject(Object.assign(new Error(detail ? `${message}: ${detail}` : message), {
+                status: clientError ? status : 503,
+              }))
+            }
             try {
               const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
               const vector = body.data?.[0]?.embedding

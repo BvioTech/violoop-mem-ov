@@ -30,7 +30,9 @@ function createEmbeddingApi({ embedder, gatewayUrl, token, run = task => task() 
   }
   function encode(input, signal) {
     return new Promise((resolve, reject) => {
-      const payload = Buffer.from(JSON.stringify({ model: 'bge-m3', input, input_type: 'document', encoding_format: 'float' }))
+      const payload = Buffer.from(JSON.stringify({
+        model: 'bge-m3', input, input_type: 'document', encoding_format: 'float', truncate: false,
+      }))
       const request = http.request(gatewayUrl + '/embeddings', { method: 'POST', signal,
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'content-length': payload.length } }, response => {
         const chunks = []; let size = 0
@@ -41,8 +43,15 @@ function createEmbeddingApi({ embedder, gatewayUrl, token, run = task => task() 
         })
         response.on('error', reject)
         response.on('end', () => {
-          if (response.statusCode !== 200) return reject(Object.assign(Error('local_embedding_failed'), { status: response.statusCode }))
-          try { resolve(JSON.parse(Buffer.concat(chunks))) } catch { reject(Error('invalid_embedding_response')) }
+          const status = response.statusCode
+          let body
+          try { body = JSON.parse(Buffer.concat(chunks)) } catch { /* Use the status if the body is invalid. */ }
+          if (status === 200) {
+            if (body) return resolve(body)
+            return reject(Error('invalid_embedding_response'))
+          }
+          const detail = status === 400 || status === 413 ? body?.error : null
+          reject(Object.assign(Error(detail?.message || 'local_embedding_failed'), { status, code: detail?.code }))
         })
       })
       request.on('error', reject)
@@ -60,7 +69,7 @@ function createEmbeddingApi({ embedder, gatewayUrl, token, run = task => task() 
       if (req.method !== 'POST') return reply(405, { error: 'method_not_allowed' })
       const body = await readBody(req, 300000)
       const profile = await describe()
-      if (body.version !== 1 || body.revision !== profile.revision || body.model !== profile.model ||
+      if (body?.version !== 1 || body.revision !== profile.revision || body.model !== profile.model ||
           !Array.isArray(body.input) || !body.input.length || body.input.length > profile.maxBatch ||
           body.input.some(text => typeof text !== 'string' || !text.trim() || text.length > profile.maxInputChars))
         return reply(400, { error: 'invalid_embedding_request_or_revision' })
@@ -69,6 +78,9 @@ function createEmbeddingApi({ embedder, gatewayUrl, token, run = task => task() 
       if (after.revision !== profile.revision) throw Error('embedding_revision_changed')
       return reply(200, { ...result, profile })
     } catch (error) {
+      if (error.status === 400 || error.status === 413) {
+        return reply(error.status, { error: error.code || 'invalid_embedding_input', message: error.message })
+      }
       // Network exceptions can carry URLs/credentials. Return a stable code.
       reply(error.status >= 400 && error.status < 600 ? error.status : 503, { error: 'local_embedding_unavailable' })
     } finally { clearTimeout(timer) }

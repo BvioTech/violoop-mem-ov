@@ -176,9 +176,9 @@ def test_auth_takes_precedence_over_quota():
 # --- permanent vs auth split (400 vs 401/403) ---
 
 
-def test_classify_400_is_permanent():
-    """A 400 parameter error is request-level permanent (fail-fast)."""
-    error = RuntimeError("Error code: 400 - invalid parameter `model`")
+@pytest.mark.parametrize("status", [400, 404, 422])
+def test_classify_request_errors_as_permanent(status):
+    error = RuntimeError(f"Error code: {status} - invalid request")
     assert classify_api_error(error) == ERROR_CLASS_PERMANENT
 
 
@@ -255,6 +255,43 @@ def test_quota_exceeded_case_insensitive():
     """Quota detection is case-insensitive."""
     assert classify_api_error(RuntimeError("QUOTA LIMIT")) == ERROR_CLASS_QUOTA_EXCEEDED
     assert classify_api_error(RuntimeError("Quota Exceed")) == ERROR_CLASS_QUOTA_EXCEEDED
+    assert (
+        classify_api_error(RuntimeError("Error code: 429 - insufficient_quota"))
+        == ERROR_CLASS_QUOTA_EXCEEDED
+    )
+    assert (
+        classify_api_error(
+            RuntimeError(
+                "Error code: 429 - You exceeded your current quota, please check your billing."
+            )
+        )
+        == ERROR_CLASS_QUOTA_EXCEEDED
+    )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "HTTP 429: rate limit reached for the per-minute request quota; retry in 1 second",
+        "Error code: 429 - TooManyRequests: per-minute token quota reached, retry later",
+    ],
+)
+def test_429_temporary_rate_limit_mentioning_quota_stays_transient(message):
+    assert classify_api_error(RuntimeError(message)) == ERROR_CLASS_TRANSIENT
+
+
+def test_content_safety_does_not_trip_circuit_breaker():
+    from openviking.utils.circuit_breaker import CircuitBreaker
+
+    breaker = CircuitBreaker(failure_threshold=1)
+    breaker.record_failure(
+        RuntimeError(
+            "Error code: 400 - Migration embedding service returned HTTP 400: "
+            "content policy rejected the request"
+        )
+    )
+    assert breaker._failure_count == 0
+    breaker.check()
 
 
 @pytest.mark.parametrize(
@@ -266,6 +303,10 @@ def test_quota_exceeded_case_insensitive():
             "and text exceed max message tokens."
         ),
         "Error code: 413 - Payload Too Large",
+        "Input length exceeds model context length",
+        "Error code: 413 - {'message': 'Input length exceeds model context length'}",
+        "Error code: 400 - Migration embedding service returned HTTP 400: context_length_exceeded",
+        "Migration embedding service returned HTTP 400: Invalid context length for this model",
         (
             "Error code: 500 - {'error': {'code': 500, 'message': "
             "'input (8525 tokens) is too large to process. increase the physical batch size "

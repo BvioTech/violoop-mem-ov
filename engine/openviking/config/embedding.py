@@ -18,6 +18,7 @@ from openviking.service.task_tracker_concurrency import KeyedAsyncLockPool
 from openviking.utils.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
 from openviking.utils.model_retry import (
     ERROR_CLASS_AUTH,
+    ERROR_CLASS_CONTENT_SAFETY,
     ERROR_CLASS_INPUT_TOO_LARGE,
     classify_api_error,
 )
@@ -256,7 +257,11 @@ class AccountEmbeddingProvider:
                         f"got {len(result.dense_vector)}"
                     )
         except Exception as exc:
-            if classify_api_error(exc) not in {ERROR_CLASS_AUTH, ERROR_CLASS_INPUT_TOO_LARGE}:
+            if classify_api_error(exc) not in {
+                ERROR_CLASS_AUTH,
+                ERROR_CLASS_CONTENT_SAFETY,
+                ERROR_CLASS_INPUT_TOO_LARGE,
+            }:
                 resource.breaker.record_failure(exc)
             raise
         resource.breaker.record_success()

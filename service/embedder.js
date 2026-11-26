@@ -84,6 +84,12 @@ function profileFor(modelPath) {
   return PROFILES.find((p) => p.match.test(base)) || FALLBACK_PROFILE
 }
 
+function embeddingInputTooLarge(cause) {
+  return Object.assign(new Error('Input length exceeds model context length', { cause }), {
+    status: 413, code: 'embedding_input_too_large',
+  })
+}
+
 // 试探原生插件能不能在这台机器上加载。getLlama() 挑后端 + dlopen 预编译
 // 二进制,这一步在不兼容的 CPU/系统上是**进程级崩溃**而不是 JS 异常,只能
 // 隔在另一个进程里试。子进程正常退出(code 0)才认为可用。
@@ -218,28 +224,61 @@ class Embedder {
 
   // 提示词格式跟随模型 profile(gemma 非对称前缀 / bge-m3 裸文本)。
   // 改格式=整个分数分布平移=标定作废,动之前必须重跑双探针。
-  async embedQuery(text) {
+  async embedQuery(text, options) {
     if (!(await this.ensureLoaded())) return null
-    return this._embed(this.profile.query(text))
+    return this._embed(this.profile.query(text), options)
   }
 
-  async embedDocument({ title, text } = {}) {
+  async embedDocument({ title, text } = {}, options) {
     if (!(await this.ensureLoaded())) return null
-    return this._embed(this.profile.doc(title, text))
+    return this._embed(this.profile.doc(title, text), options)
   }
 
-  async _embed(formatted, retried = false) {
+  _tokenize(formatted, truncate) {
+    const runtime = this._ctx?._llamaContext
+    const tokenizer = runtime?.model?.tokenizer ?? this._model?.tokenizer
+    if (typeof tokenizer !== 'function') return formatted
+
+    const tokens = tokenizer(formatted, false)
+    if (!tokens.length) {
+      throw Object.assign(new Error('Embedding input is empty after tokenization'), {
+        status: 400, code: 'embedding_input_empty',
+      })
+    }
+    if (!Number.isInteger(runtime?.contextSize)) return tokens
+
+    // getEmbeddingFor may add a beginning and an end token after its size check.
+    // The sequence decoder also leaves one slot free to avoid shifting the context.
+    const budget = runtime.contextSize - 3
+    if (tokens.length <= budget) return tokens
+    if (!truncate || budget < 1) throw embeddingInputTooLarge()
+    console.warn(`[embedder] truncated embedding input from ${tokens.length} to ${budget} tokens`)
+    return tokens.slice(0, budget)
+  }
+
+  async _embed(formatted, { truncate = true } = {}) {
     if (this._suspended) return null
     this._active++
     try {
-      const e = await this._ctx.getEmbeddingFor(formatted)
-      return new Float32Array(e.vector)
-    } catch (err) {
+      let input
       // getEmbeddingFor fails intermittently under sustained sequential
       // load; one retry recovers it (observed during calibration probing).
-      if (!retried && !this._suspended) return await this._embed(formatted, true)
-      console.warn('[embedder] embed failed:', err?.message || err)
-      return null
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          input ??= this._tokenize(formatted, truncate)
+          const embedding = await this._ctx.getEmbeddingFor(input)
+          return new Float32Array(embedding.vector)
+        } catch (err) {
+          if (err?.status === 400 || err?.status === 413) throw err
+          if (/context size|too many tokens|failed to free up space for new tokens/i.test(err?.message || '')) {
+            throw embeddingInputTooLarge(err)
+          }
+          if (attempt || this._suspended) {
+            console.warn('[embedder] embed failed:', err?.message || err)
+            return null
+          }
+        }
+      }
     } finally {
       this._active--
       if (!this._active) { this._onIdle?.(); this._onIdle = null }
